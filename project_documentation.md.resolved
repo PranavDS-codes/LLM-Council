@@ -1,0 +1,146 @@
+# LLM Council Project Documentation
+
+## 1. Overview and Capabilities
+
+**LLM Council** is an advanced multi-agent system designed to produce high-quality, nuanced, and well-structured responses to complex queries. Instead of relying on a single Large Language Model (LLM) which might have biases or limited perspectives, the LLM Council emulates a human deliberation process.
+
+### Core Capabilities
+*   **Multi-Perspective Analysis**: Leverages diverse personas (e.g., Academic, Skeptic, Futurist) to view a problem from multiple angles.
+*   **Adversarial Critique**: Employes a critic agent to rigorously evaluate initial drafts, identifying logical fallacies, missing information, and structural weaknesses.
+*   **Structured Planning**: Uses an Architect agent to design a coherent "blueprint" for the final answer, ensuring logical flow and completeness.
+*   **Polished Synthesis**: A Finalizer agent synthesizes the best ideas and the architectural plan into a cohesive, production-ready response.
+*   **Model Agnostic/Hybrid**: Configurable to use different LLMs for different roles (e.g., specialized models for planning vs. writing) via the OpenRouter API.
+
+## 2. Architecture and Workflow
+
+The system operates in a four-phase asynchronous workflow:
+
+### Phase 1: The Generators (Divergent Thinking)
+*   **Role**: Brainstorming and initial drafting.
+*   **Process**: Multiple agents with distinct personas generate independent responses to the user's query.
+*   **Personas**:
+    *   *The Academic*: Focuses on rigorous definitions, history, and theory.
+    *   *The Layman*: Prioritizes simplicity, analogies, and practical impact.
+    *   *The Skeptic*: Identifies risks, edge cases, and hidden costs.
+    *   *The Futurist*: Looks at long-term trends and possibilities.
+    *   *The Ethical Guardian*: Evaluates societal impact, bias, and safety.
+*   **Concurrency**: All generators run in parallel to minimize latency.
+
+### Phase 2: The Critic (Convergent Selection)
+*   **Role**: Quality control and selection.
+*   **Process**: A "Critic" agent reviews the generated responses in batches.
+*   **Output**: It selects a "winner" based on reasoning, spots flaws, assigns scores (1-10), and produces a structured JSON evaluation.
+
+### Phase 3: The Architect (Structural Planning)
+*   **Role**: Strategic organization.
+*   **Process**: An "Architect" agent takes the best content from Phase 2 and the critique feedback to create a blueprint.
+*   **Output**: A JSON plan containing:
+    *   `structure`: An ordered list of section headers.
+    *   `tone_guidelines`: Voice and style instructions.
+    *   `missing_facts_to_add`: Facts that need to be injected.
+    *   `critique_integration`: Strategy for addressing identified flaws.
+
+### Phase 4: The Finalizer (Execution)
+*   **Role**: Writing the final response.
+*   **Process**: A "Finalizer" agent follows the Architect's blueprint to write the final answer.
+*   **Result**: A comprehensive, well-structured text output presented to the user.
+
+## 3. Technologies Used
+
+*   **Language**: Python 3.x
+*   **Concurrency**: `asyncio` for efficient parallel execution of LLM calls.
+*   **Data Validation**: `Pydantic` for defining robust schemas ([CriticOutput](file:///Users/pranavpant/Desktop/code%20/LLM%20Council/llm_council/schemas.py#4-10), [ArchitectBlueprint](file:///Users/pranavpant/Desktop/code%20/LLM%20Council/llm_council/schemas.py#11-16)) to ensure Agents return structured data.
+*   **LLM Interface**: Custom `LLMClient` interacting with **OpenRouter API**, allowing access to top-tier models like NVIDIA Nemotron, Qwen, and DeepSeek.
+*   **Configuration**: `dotenv` for secure environment variable management.
+*   **Logging**: Custom `WorkflowTracer` for debugging and recording the decision-making process ("flight recorder").
+
+## 4. Installation and Usage
+
+### Prerequisites
+*   Python 3.8+
+*   An OpenRouter API Key
+
+### Installation
+1.  **Clone the repository**:
+    ```bash
+    git clone <repository-url>
+    cd llm_council
+    ```
+2.  **Install dependencies**:
+    ```bash
+    pip install -r requirements.txt
+    ```
+3.  **Configure Environment**:
+    Create a [.env](file:///Users/pranavpant/Desktop/code%20/LLM%20Council/llm_council/.env) file in the `llm_council` directory:
+    ```env
+    OPENROUTER_API_KEY=your_api_key_here
+    OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+    USE_MOCK_MODE=False
+    ```
+
+### Usage
+Run the main script:
+```bash
+python llm_council/main.py
+```
+
+**Interactive Prompts:**
+1.  **Query**: Enter your question or topic (e.g., "Explain the future of AI in healthcare").
+2.  **Agents**: Select which personas to activate by index (e.g., `1 3 5` to use Academic, Skeptic, and Ethical Guardian).
+    *   1: The Academic
+    *   2: The Layman
+    *   3: The Skeptic
+    *   4: The Futurist
+    *   5: The Ethical Guardian
+
+### Configuration
+The [llm_council/config.py](file:///Users/pranavpant/Desktop/code%20/LLM%20Council/llm_council/config.py) file is the central control hub.
+
+**1. Managing Personas (`PERSONA` dict):**
+You can add, remove, or modify agents here.
+```python
+"The Skeptic": {
+    "description": "You are a critical thinker who looks for the catch..."
+}
+```
+*   **Key**: The name of the agent (e.g., "The Skeptic").
+*   **Value**: A dictionary containing the "description" which serves as the system prompt instruction.
+
+**2. Assigning Models (`MODEL_MAP` dict):**
+Assign specific models to specific roles. You can use any model string supported by OpenRouter.
+```python
+MODEL_MAP = {
+    "generator_1": "nvidia/nemotron-nano-12b-v2-vl:free",
+    "critic": "qwen/qwen3-235b-a22b:free",
+    # ...
+}
+```
+*   It is recommended to use high-reasoning models (e.g., DeepSeek R1, Qwen 2.5 72B) for the **Critic** and **Architect** roles.
+*   Faster, cheaper models can be used for **Generators**.
+
+## 5. Extensibility
+
+**Adding a New Agent**:
+1.  Open [llm_council/config.py](file:///Users/pranavpant/Desktop/code%20/LLM%20Council/llm_council/config.py).
+2.  Add a new entry to the `PERSONA` dictionary with a unique name and detailed description.
+3.  The main script dynamically loads these, so no other code changes are needed to make them available in the CLI selection.
+
+**Customizing Prompts**:
+*   Prompts are stored as text files in `llm_council/prompts/`.
+*   You can edit `1_generator.txt`, `2_critic.txt`, etc., to change the instructions given to the LLMs without changing the Python code.
+
+## 6. Project Structure
+
+```text
+llm_council/
+├── main.py            # Entry point and orchestration logic
+├── config.py          # Configuration (Personas, Models, API Keys)
+├── llm_client.py      # LLM API Client (OpenRouter)
+├── schemas.py         # Pydantic models for structured output
+├── tracer.py          # Logging and tracing utility
+├── prompts/           # Prompt templates
+│   ├── 1_generator.txt
+│   ├── 2_critic.txt
+│   └── ...
+└── logs/              # Execution logs (Flight Recorder)
+```

@@ -1,0 +1,68 @@
+LLM Council Project Information
+===============================
+
+1. PROJECT OVERVIEW
+-------------------
+LLM Council is an advanced multi-agent system designed to produce high-quality, nuanced responses by simulating a human deliberation process. 
+Instead of a single LLM response, it employs a "council" of diverse personas to brainstorm, critique, plan, and finalize a comprehensive answer.
+
+2. CODE METHODOLOGY (The 4-Phase Workflow)
+------------------------------------------
+The core logic resides in `main.py` and follows a strict four-phase asynchronous workflow:
+
+Phase 1: Divergent Generation
+- Goal: Brainstorming from multiple perspectives.
+- Mechanism: Multiple "Generator" agents are instantiated, each with a specific "Persona" (e.g., Academic, Skeptic, Futurist, etc.) defined in `config.py`.
+- Concurrency: These agents run in parallel using `asyncio` to fetch independent responses to the user's query.
+- Prompt: `prompts/1_generator.txt`
+
+Phase 2: Convergent Critique
+- Goal: Quality control and selection.
+- Mechanism: A single "Critic" agent reviews all responses from Phase 1.
+- Output: It selects the best candidate, identifies flaws, and produces a structured JSON evaluation (Schema: `CriticOutput`).
+- Prompt: `prompts/2_critic.txt`
+
+Phase 3: Structural Architecture
+- Goal: Strategic planning.
+- Mechanism: An "Architect" agent takes the "Best Candidate" from Phase 2 and the critique feedback.
+- Output: A "Blueprint" (Schema: `ArchitectBlueprint`) containing an ordered structure, tone guidelines, and specific instructions to address gaps or errors.
+- Prompt: `prompts/3_architect.txt`
+
+Phase 4: Final Execution
+- Goal: Synthesis and polishing.
+- Mechanism: A "Finalizer" agent writes the final response following the Architect's blueprint.
+- Result: A polished, production-ready answer.
+- Prompt: `prompts/4_finalizer.txt`
+
+3. TECHNICAL STACK & IMPLEMENTATION DETAILS
+-------------------------------------------
+- Language: Python 3.8+
+- Asyncio: Used heavily in `main.py` to manage concurrent API calls, significantly reducing total latency.
+- Pydantic: Used in `schemas.py` to enforce strict output schemas (JSON) for the Critic and Architect agents, ensuring reliable parsing.
+- LLM Client (`llm_client.py`):
+  - Wraps `AsyncOpenAI` to interact with the OpenRouter API.
+  - Retry Logic: Implements retry logic with exponential backoff for handling `429` (Rate Limit) and `5xx` (Server Error) HTTP status codes with a default of 3 retries.
+  - Mock Mode: Supports a `USE_MOCK_MODE` flag (in `.env`) to simulate responses for testing without incurring API costs.
+- Dependencies: `python-dotenv`, `pydantic`, `openai`, `google-generativeai`.
+
+4. KEY FILES AND DIRECTORIES
+----------------------------
+- `llm_council/main.py`: The entry point. Handles the orchestration of the 4 phases and user interaction.
+- `llm_council/config.py`: The central configuration file.
+    - `PERSONA`: Dictionary defining agent personas and their system prompts.
+    - `MODEL_MAP`: Maps specific roles (generator, critic, etc.) to specific OpenRouter models (e.g., `nvidia/nemotron-nano-12b-v2-vl:free`, `qwen/qwen3-235b-a22b:free`).
+- `llm_council/prompts/`: Externalized text files for prompts. Allows modifying agent instructions without changing code.
+- `llm_council/schemas.py`: Defines Pydantic models for structured data exchange.
+- `llm_council/logs/`: Stores execution traces. Useful for debugging and auditing "why" a decision was made.
+
+5. IMPORTANT CONFIGURATION
+--------------------------
+- Environment Variables: Managed via `.env` file (requires `OPENROUTER_API_KEY`).
+- Adding Agents: Add a new key-value pair to the `PERSONA` dict in `config.py`.
+- Changing Models: Update `MODEL_MAP` in `config.py` to switch between different LLMs (e.g., swapping a cheaper model for generators and a smarter implementation-heavy model for the architect).
+
+6. USAGE
+--------
+Run the system via:
+python llm_council/main.py
+Follow the interactive prompts to enter a query and select which personas to active for the "Council".

@@ -2,3 +2,7 @@ python-dotenv
 pydantic
 openai
 google-generativeai
+fastapi
+uvicorn
+python-multipart
+sse-starlette

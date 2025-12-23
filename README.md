@@ -1,6 +1,6 @@
 # The LLM Council
 
-![The LLM Council](file:///Users/pranavpant/Desktop/code%20/LLM%20Council/llm_council_hero_1766533132243.png)
+![The LLM Council](file:///LLM%20Council/llm_council_hero_1766533132243.png)
 
 ## Overview
 **The LLM Council** is a Full-Stack AI Application that simulates a high-stakes decision-making council. It deploys a swarm of autonomous AI agents—each with a distinct persona (e.g., The Academic, The Skeptic, The Futurist)—to analyze your query from multiple angles, debate the findings, and synthesize a comprehensive verdict.

@@ -25,10 +25,8 @@ class LLMClient:
         
         return await self._real_generate(prompt, schema, model)
 
-    # ... (mock methods generally unchanged or can be kept as is if not replacing whole file) ...
-
     async def _mock_generate(self, prompt: str, schema: Optional[Any] = None) -> str:
-        await asyncio.sleep(0.5) # Simulate latency
+        await asyncio.sleep(0.5)
         
         if "You are an impartial Senior Quality Assurance Judge" in prompt:
              return json.dumps({
@@ -51,10 +49,8 @@ class LLMClient:
             return f"Mock Response to: {prompt[:50]}..."
 
     async def _real_generate(self, prompt: str, schema: Optional[Any] = None, model: Optional[str] = None) -> str:
-        # Use provided model or default to generator
         target_model = model if model else MODEL_MAP.get("generator_1", "nvidia/nemotron-nano-12b-v2-vl:free")
         
-        # Prepare kwargs
         kwargs = {
             "model": target_model,
             "messages": [{"role": "user", "content": prompt}],
@@ -64,29 +60,26 @@ class LLMClient:
             }
         }
         
-        # Enable JSON mode if schema is requested
         if schema:
             kwargs["response_format"] = {"type": "json_object"}
         
-        # Retry logic parameters
         max_retries = 3
         base_delay = 2
         
         for attempt in range(max_retries + 1):
             try:
                 response = await self.openai_client.chat.completions.create(**kwargs)
+                if not response or not response.choices:
+                     raise ValueError("Received empty response or no choices from API")
                 return response.choices[0].message.content
             except Exception as e:
                 error_msg = str(e)
-                # Check if it is the last attempt
                 if attempt == max_retries:
                     return f"Error calling OpenRouter after {max_retries} retries: {error_msg}"
                 
-                # Check if error is related to rate limits or overloaded servers
                 if "429" in error_msg or "500" in error_msg or "503" in error_msg:
                     delay = base_delay * (2 ** attempt) + (random.random() * 0.5)
                     print(f"[Warning] Rate limit/Server error encountered. Retrying in {delay:.2f}s... (Attempt {attempt + 1}/{max_retries})")
                     await asyncio.sleep(delay)
                 else:
-                    # If it's another error (e.g. auth), fail fast
                     return f"Error calling OpenRouter: {error_msg}"

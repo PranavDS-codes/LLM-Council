@@ -11,7 +11,6 @@ OPENROUTER_SITE_URL = os.getenv("OPENROUTER_SITE_URL", "https://llm-council.loca
 OPENROUTER_APP_NAME = os.getenv("OPENROUTER_APP_NAME", "LLM Council")
 
 # Agent Definitions
-# Agent Definitions
 PERSONA = {
     "The Academic": {
         "description": "You are a rigorous researcher. Focus on definitions, historical context, theoretical frameworks, and first principles. Cite logical fallacies if present. Use formal, precise language. Prioritize accuracy and depth over simplicity."
@@ -31,14 +30,13 @@ PERSONA = {
 }
 
 # Model Assignment
-# You can change these to any model from OpenRouter
 MODEL_MAP = {
     "generator_1": "nvidia/nemotron-nano-12b-v2-vl:free", 
-    "generator_2": "nvidia/nemotron-nano-12b-v2-vl:free",
-    "generator_3": "nvidia/nemotron-nano-12b-v2-vl:free",
-    "generator_4": "nvidia/nemotron-nano-12b-v2-vl:free", 
-    "generator_5": "nvidia/nemotron-nano-12b-v2-vl:free",
+    "generator_2": "nvidia/nemotron-3-nano-30b-a3b:free",
+    "generator_3": "z-ai/glm-4.5-air:free",
+    "generator_4": "mistralai/devstral-2512:free", 
+    "generator_5": "xiaomi/mimo-v2-flash:free",
     "critic": "tngtech/deepseek-r1t-chimera:free", 
     "architect": "tngtech/deepseek-r1t-chimera:free",
-    "finalizer": "tngtech/deepseek-r1t2-chimera:free" # 671b
+    "finalizer": "tngtech/deepseek-r1t2-chimera:free"
 }

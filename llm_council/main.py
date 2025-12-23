@@ -40,6 +40,9 @@ async def main():
     # Interactive Input Mode
     print("Welcome to LLM council")
     query = input("Query: ")
+    print("Available Agents:")
+    for i, persona in enumerate(PERSONA.keys()):
+        print(f"{i+1}: {persona}")
     indices_input = input("Agents (e.g. 1,2,3): ")
     
     selected_indices = [1, 2, 3] # Default

@@ -3,7 +3,7 @@ import datetime
 import json
 
 class WorkflowTracer:
-    def __init__(self, log_dir="llm_council/logs"):
+    def __init__(self, log_dir="logs"):
         """
         Initializes the WorkflowTracer with a unique log file.
         """

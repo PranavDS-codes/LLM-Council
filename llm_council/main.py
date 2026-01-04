@@ -6,10 +6,23 @@ from llm_client import LLMClient
 from config import PERSONA, MODEL_MAP
 from schemas import CriticOutput, ArchitectBlueprint
 
-# Load Prompts
+
+# GET THE ABSOLUTE PATH OF THE DIRECTORY CONTAINING THIS SCRIPT
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 def load_prompt(filename):
-    with open(os.path.join("llm_council/prompts", filename), "r") as f:
-        return f.read()
+    # Construct path relative to this script's location
+    # It will look in: /app/llm_council/prompts/filename
+    filepath = os.path.join(BASE_DIR, "prompts", filename)
+    
+    try:
+        with open(filepath, "r") as f:
+            return f.read()
+    except FileNotFoundError:
+        # Fallback debug print to help if it fails again
+        print(f"❌ Error: Could not find prompt at {filepath}")
+        print(f"   Current Working Directory: {os.getcwd()}")
+        raise
 
 PROMPT_GENERATOR = load_prompt("1_generator.txt")
 PROMPT_CRITIC = load_prompt("2_critic.txt")

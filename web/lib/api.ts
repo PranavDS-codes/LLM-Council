@@ -1,6 +1,13 @@
 import { useCouncilStore } from '@/store/councilStore';
 
-const API_URL = 'http://localhost:8000/api/summon';
+// web/app/page.tsx (or wherever your API call is)
+
+// 1. Try to get the URL from the environment (Vercel sets this)
+// 2. If it's missing (like on your laptop), fall back to localhost
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+// Construct the final endpoint
+const API_URL = `${BASE_URL}/api/summon`;
 
 export async function summonCouncil(query: string, selectedAgents: string[]) {
     const store = useCouncilStore.getState();

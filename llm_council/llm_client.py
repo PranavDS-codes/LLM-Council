@@ -8,10 +8,14 @@ from openai import AsyncOpenAI
 from config import USE_MOCK_MODE, OPENROUTER_API_KEY, OPENROUTER_BASE_URL, MODEL_MAP, OPENROUTER_SITE_URL, OPENROUTER_APP_NAME
 
 class LLMClient:
-    def __init__(self):
+    def __init__(self, api_key: Optional[str] = None):
         self.mock_mode = USE_MOCK_MODE
+        
+        # Use passed key, or fallback to env, or None
+        target_key = api_key if api_key else OPENROUTER_API_KEY
+        
         self.openai_client = AsyncOpenAI(
-            api_key=OPENROUTER_API_KEY,
+            api_key=target_key,
             base_url=OPENROUTER_BASE_URL
         ) if not self.mock_mode else None
         
@@ -81,5 +85,29 @@ class LLMClient:
                     delay = base_delay * (2 ** attempt) + (random.random() * 0.5)
                     print(f"[Warning] Rate limit/Server error encountered. Retrying in {delay:.2f}s... (Attempt {attempt + 1}/{max_retries})")
                     await asyncio.sleep(delay)
-                else:
                     return f"Error calling OpenRouter: {error_msg}"
+
+    async def check_connection(self, model: str) -> bool:
+        """
+        Validates the API connection and Model ID by making a minimal request.
+        Raises specific exceptions on failure (handled by caller).
+        """
+        if self.mock_mode:
+            await asyncio.sleep(0.5)
+            # Simulate failure for specific mock models if needed, or always pass
+            return True
+
+        # Minimal generation request
+        kwargs = {
+            "model": model,
+            "messages": [{"role": "user", "content": "Hi"}],
+            "max_tokens": 1,
+            "extra_headers": {
+                "HTTP-Referer": OPENROUTER_SITE_URL,
+                "X-Title": OPENROUTER_APP_NAME,
+            }
+        }
+        
+        # This will raise openai.APIStatusError if auth or model is invalid
+        await self.openai_client.chat.completions.create(**kwargs)
+        return True

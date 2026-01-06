@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 class CriticOutput(BaseModel):
     winner_id: str = Field(description="The ID of the winning response")
@@ -13,3 +13,4 @@ class ArchitectBlueprint(BaseModel):
     tone_guidelines: str = Field(description="Voice and style instructions")
     missing_facts_to_add: List[str] = Field(description="Specific facts or corrections to inject")
     critique_integration: str = Field(description="Strategy for merging critique feedback")
+

@@ -5,6 +5,7 @@ import { CouncilTimeline } from '@/components/CouncilTimeline';
 import { useCouncilStore } from '@/store/councilStore';
 import { summonCouncil } from '@/lib/api';
 import { ArrowRight, Sparkles } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 export default function Home() {
   const { query, setQuery, isProcessing, agents, activePhase } = useCouncilStore();
@@ -17,6 +18,23 @@ export default function Home() {
     await summonCouncil(query, selectedAgents);
   };
 
+  // Scroll Animation Logic
+  const [scrollState, setScrollState] = useState(false);
+
+  useEffect(() => {
+    const main = document.querySelector('main');
+    if (!main) return;
+
+    const handleScroll = () => {
+      setScrollState(main.scrollTop > 50);
+    };
+
+    main.addEventListener('scroll', handleScroll);
+    return () => main.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const shouldShrink = activePhase > 0 || scrollState;
+
   return (
     <div className="min-h-full">
 
@@ -26,12 +44,12 @@ export default function Home() {
        */}
       <div className={`
          transition-all duration-700 ease-in-out border-b border-[var(--border-base)] bg-[var(--bg-app)]/80 backdrop-blur sticky top-0 z-20
-         ${activePhase > 0 ? 'py-4 shadow-xl' : 'py-20'}
+         ${shouldShrink ? 'py-4 shadow-xl' : 'py-20'}
        `}>
         <div className="max-w-3xl mx-auto px-6 text-center space-y-8">
 
           {/* Header - Only visible when idle */}
-          {activePhase === 0 && (
+          {activePhase === 0 && !scrollState && (
             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-700">
               <h1 className="text-4xl md:text-5xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-indigo-500 filter drop-shadow-[0_0_10px_rgba(34,211,238,0.3)]">
                 ASSEMBLE THE COUNCIL
@@ -43,15 +61,15 @@ export default function Home() {
           )}
 
           {/* Input Form */}
-          <form onSubmit={handleSummon} className="space-y-6">
+          <form onSubmit={handleSummon} className={`space-y-6 transition-all duration-700 ${shouldShrink ? 'translate-y-0' : ''}`}>
 
             {/* Agent Selector - Hide when processing to reduce noise? Or disable. */}
-            <div className={`transition-all duration-500 ${activePhase > 0 ? 'scale-75 opacity-50 pointer-events-none hidden md:block' : 'opacity-100'}`}>
+            <div className={`transition-all duration-500 ${activePhase > 0 || scrollState ? 'scale-75 opacity-50 pointer-events-none hidden md:block' : 'opacity-100'}`}>
               <AgentSelector />
             </div>
 
             {/* Input Field */}
-            <div className="relative group max-w-2xl mx-auto">
+            <div className={`relative group max-w-2xl mx-auto transition-all duration-700 origin-top ${shouldShrink ? 'scale-90' : 'scale-100'}`}>
               <div className="absolute -inset-1 bg-gradient-to-r from-cyan-500 to-indigo-600 rounded-lg blur opacity-25 group-hover:opacity-50 transition duration-1000"></div>
               <div className="relative flex items-center bg-[var(--bg-panel)] rounded-lg p-1 pr-2 border border-[var(--border-base)] shadow-sm">
                 <textarea

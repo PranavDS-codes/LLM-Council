@@ -11,15 +11,21 @@ const API_URL = `${BASE_URL}/api/summon`;
 
 export async function summonCouncil(query: string, selectedAgents: string[]) {
     const store = useCouncilStore.getState();
-    store.resetAll();
-    store.setQuery(query);
-    useCouncilStore.setState({ isProcessing: true, activePhase: 1 });
+    store.createSession(query);
+
+    // Retrieve overrides
+    const { apiKey, modelOverrides } = store.settings;
 
     try {
         const response = await fetch(API_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query, selected_agents: selectedAgents }),
+            body: JSON.stringify({
+                query,
+                selected_agents: selectedAgents,
+                custom_api_key: apiKey || null,
+                custom_model_map: Object.keys(modelOverrides).length > 0 ? modelOverrides : null
+            }),
         });
 
         if (!response.ok) {
@@ -74,6 +80,9 @@ function handleEvent(type: string, data: any) {
     switch (type) {
         case 'generator_start':
             store.addMessage(`[System] Initializing ${data.agent}...`);
+            if (data.model) {
+                store.setAgentModel(data.agent, data.model);
+            }
             break;
         case 'generator_chunk':
             store.appendToGenerator(data.agent, data.chunk);
@@ -95,7 +104,7 @@ function handleEvent(type: string, data: any) {
         case 'done':
             store.addMessage('[System] Session Complete.');
             useCouncilStore.setState({ isProcessing: false });
-            store.saveCurrentSession();
+            store.updateCurrentSession();
             break;
     }
 }

@@ -3,6 +3,10 @@
 import { useCouncilStore } from '@/store/councilStore';
 import { FileText, Copy, Check } from 'lucide-react';
 import { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import remarkGfm from 'remark-gfm';
+import rehypeKatex from 'rehype-katex';
 
 export function PhaseFinalizer() {
     const { finalizerText } = useCouncilStore();
@@ -17,16 +21,16 @@ export function PhaseFinalizer() {
     if (!finalizerText) return null;
 
     return (
-        <div className="bg-white text-slate-900 rounded-lg shadow-2xl overflow-hidden relative min-h-[500px]">
+        <div className="bg-[var(--bg-panel)] border border-[var(--border-base)] rounded-lg shadow-2xl overflow-hidden relative min-h-[500px] transition-colors duration-300">
             {/* Document Header */}
-            <div className="bg-gray-50 dark:bg-slate-100 border-b border-gray-200 dark:border-slate-200 p-3 flex justify-between items-center text-slate-900">
-                <div className="flex items-center gap-2 text-slate-500 text-xs font-bold uppercase">
+            <div className="bg-[var(--bg-panel-secondary)] border-b border-[var(--border-base)] p-3 flex justify-between items-center text-[var(--text-main)]">
+                <div className="flex items-center gap-2 text-[var(--text-muted)] text-xs font-bold uppercase">
                     <FileText className="w-4 h-4" />
                     Final Consensus Document
                 </div>
                 <button
                     onClick={handleCopy}
-                    className="flex items-center gap-2 px-3 py-1 bg-white border border-slate-300 rounded hover:bg-slate-50 text-xs font-medium text-slate-700 transition"
+                    className="flex items-center gap-2 px-3 py-1 bg-[var(--bg-panel)] border border-[var(--border-base)] rounded hover:bg-[var(--bg-panel-secondary)] text-xs font-medium text-[var(--text-main)] transition"
                 >
                     {copied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
                     {copied ? 'Copied' : 'Copy'}
@@ -34,8 +38,10 @@ export function PhaseFinalizer() {
             </div>
 
             {/* Document Body */}
-            <div className="p-8 font-serif text-lg leading-relaxed max-w-none whitespace-pre-wrap">
-                {finalizerText}
+            <div className="p-8 font-serif text-lg leading-relaxed max-w-none text-[var(--text-main)]">
+                <div className="prose prose-lg dark:prose-invert max-w-none prose-headings:text-[var(--text-main)] prose-p:text-[var(--text-main)] prose-strong:text-[var(--text-main)] prose-li:text-[var(--text-main)]">
+                    <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>{finalizerText}</ReactMarkdown>
+                </div>
             </div>
         </div>
     );

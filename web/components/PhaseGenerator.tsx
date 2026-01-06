@@ -1,51 +1,71 @@
 'use client';
 
 import { useCouncilStore } from '@/store/councilStore';
-import { useState, useEffect } from 'react';
-import { User, Activity } from 'lucide-react';
+import { useState } from 'react';
+import { Activity, Maximize2, Minimize2, Cpu } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import remarkGfm from 'remark-gfm';
+import rehypeKatex from 'rehype-katex';
 
 export function PhaseGenerator() {
-    const { generatorStreams, agents } = useCouncilStore();
+    const { generatorStreams, agentModels } = useCouncilStore();
     const activeAgentNames = Object.keys(generatorStreams);
+    const [isExpanded, setIsExpanded] = useState<boolean>(true);
 
     // Default to the first active stream or the first selected agent
-    const [activeTab, setActiveTab] = useState<string>('');
-
-    useEffect(() => {
-        if (!activeTab && activeAgentNames.length > 0) {
-            setActiveTab(activeAgentNames[0]);
-        }
-    }, [activeAgentNames, activeTab]);
+    const [userSelectedTab, setUserSelectedTab] = useState<string>('');
+    const currentTab = userSelectedTab || (activeAgentNames.length > 0 ? activeAgentNames[0] : '');
 
     if (activeAgentNames.length === 0) return null;
 
     return (
-        <div className="bg-[var(--bg-panel)] border border-[var(--border-base)] rounded-lg overflow-hidden flex flex-col min-h-[400px] shadow-sm">
-            <div className="bg-[var(--bg-panel-secondary)] border-b border-[var(--border-base)] p-2 flex gap-2 overflow-x-auto">
-                {activeAgentNames.map((agentName) => (
-                    <button
-                        key={agentName}
-                        onClick={() => setActiveTab(agentName)}
-                        className={`
-              flex items-center gap-2 px-3 py-2 rounded text-xs font-mono uppercase tracking-wider transition-colors whitespace-nowrap
-              ${activeTab === agentName
-                                ? 'bg-cyan-900/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30'
-                                : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-panel)] border border-transparent'}
-            `}
-                    >
-                        {activeTab === agentName && <Activity className="w-3 h-3 animate-pulse" />}
-                        {agentName}
-                    </button>
-                ))}
+        <div className={`bg-[var(--bg-panel)] border border-[var(--border-base)] rounded-lg overflow-hidden flex flex-col shadow-sm transition-all duration-300 ${isExpanded ? 'min-h-[400px]' : ''}`}>
+            <div className="bg-[var(--bg-panel-secondary)] border-b border-[var(--border-base)] flex items-center justify-between pr-2">
+                <div className="flex gap-2 overflow-x-auto p-2 no-scrollbar">
+                    {activeAgentNames.map((agentName) => (
+                        <button
+                            key={agentName}
+                            onClick={() => setUserSelectedTab(agentName)}
+                            className={`
+                  flex items-center gap-2 px-3 py-2 rounded text-xs font-mono uppercase tracking-wider transition-colors whitespace-nowrap
+                  ${currentTab === agentName
+                                    ? 'bg-cyan-900/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30'
+                                    : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-panel)] border border-transparent'}
+                `}
+                        >
+                            {currentTab === agentName && <Activity className="w-3 h-3 animate-pulse" />}
+                            {agentName}
+                        </button>
+                    ))}
+                </div>
+
+                <button
+                    onClick={() => setIsExpanded(!isExpanded)}
+                    className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-panel)] rounded transition-colors ml-2 flex-shrink-0"
+                    title={isExpanded ? "Collapse" : "Expand"}
+                >
+                    {isExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                </button>
             </div>
 
-            <div className="p-6 font-mono text-sm leading-relaxed text-[var(--text-main)] whitespace-pre-wrap">
-                {activeTab && generatorStreams[activeTab] ? (
-                    generatorStreams[activeTab]
+            <div className={`p-6 text-sm leading-relaxed text-[var(--text-main)] transition-all duration-300 ${!isExpanded ? 'line-clamp-3 overflow-hidden' : ''}`}>
+                {currentTab && generatorStreams[currentTab] ? (
+                    <div className="prose prose-sm dark:prose-invert max-w-none font-mono prose-headings:text-[var(--text-main)] prose-p:text-[var(--text-main)] prose-strong:text-[var(--text-main)] prose-li:text-[var(--text-main)] prose-code:text-[var(--text-main)]">
+                        <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>{generatorStreams[currentTab]}</ReactMarkdown>
+                    </div>
                 ) : (
                     <span className="text-[var(--text-muted)] italic">Waiting for signal...</span>
                 )}
-                <span className="inline-block w-2 h-4 bg-cyan-500 animate-pulse ml-1 align-middle"></span>
+                {isExpanded && <span className="inline-block w-2 h-4 bg-cyan-500 animate-pulse ml-1 align-middle"></span>}
+
+                {/* Model Footer */}
+                {currentTab && generatorStreams[currentTab] && agentModels[currentTab] && (
+                    <div className="mt-6 pt-3 border-t border-[var(--border-base)] border-dashed flex items-center justify-end gap-2 text-[10px] uppercase font-mono text-[var(--text-muted)] opacity-70">
+                        <Cpu className="w-3 h-3" />
+                        <span>Generated via {agentModels[currentTab]}</span>
+                    </div>
+                )}
             </div>
         </div>
     );

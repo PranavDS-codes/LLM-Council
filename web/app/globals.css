@@ -1,38 +1,40 @@
 @import "tailwindcss";
+@import "katex/dist/katex.min.css";
+@plugin "@tailwindcss/typography";
 
 
 :root {
-  /* Light Mode Defaults */
-  --bg-app: #f8fafc;
-  /* slate-50 */
-  --bg-panel: #ffffff;
-  /* white */
-  --bg-panel-secondary: #f1f5f9;
-  /* slate-100 */
-  --border-base: #cbd5e1;
-  /* slate-300 */
-  --text-main: #0f172a;
+  /* Default to Dark Mode (Cyberpunk aesthetic requires dark first) */
+  --bg-app: #020617;
+  /* slate-950 */
+  --bg-panel: #1e293b;
+  /* slate-800 */
+  --bg-panel-secondary: #0f172a;
   /* slate-900 */
-  --text-muted: #64748b;
-  /* slate-500 */
-  --accent-glow: 226, 232, 240;
-  /* slate-200 */
+  --border-base: #334155;
+  /* slate-700 */
+  --text-main: #ffffff;
+  /* white */
+  --text-muted: #cbd5e1;
+  /* slate-300 */
+  --accent-glow: 15, 23, 42;
+  /* slate-900 */
 }
 
 :root[data-theme='dark'] {
   /* Dark Mode Overrides */
   --bg-app: #020617;
   /* slate-950 */
-  --bg-panel: #0f172a;
+  --bg-panel: #1e293b;
+  /* slate-800 - Lighter than bg-app for differentiation */
+  --bg-panel-secondary: #0f172a;
   /* slate-900 */
-  --bg-panel-secondary: #1e293b;
-  /* slate-800 */
-  --border-base: #1e293b;
-  /* slate-800 */
-  --text-main: #f1f5f9;
-  /* slate-100 */
-  --text-muted: #94a3b8;
-  /* slate-400 */
+  --border-base: #334155;
+  /* slate-700 */
+  --text-main: #ffffff;
+  /* white - Max brightness */
+  --text-muted: #cbd5e1;
+  /* slate-300 - Brighter muted text */
   --accent-glow: 15, 23, 42;
   /* slate-900 */
 }

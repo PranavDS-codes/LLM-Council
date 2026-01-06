@@ -4,10 +4,11 @@ import asyncio
 import random
 from typing import List, Dict, Any, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from openai import APIStatusError
 
 from llm_client import LLMClient
 from tracer import WorkflowTracer
@@ -52,12 +53,16 @@ except Exception as e:
 class SummonRequest(BaseModel):
     query: str
     selected_agents: List[str]
+    custom_api_key: Optional[str] = None
+    custom_model_map: Optional[Dict[str, str]] = None
 
     class Config:
         json_schema_extra = {
             "example": {
                 "query": "Should we ban AI?",
-                "selected_agents": ["The Academic", "The Ethical Guardian"]
+                "selected_agents": ["The Academic", "The Ethical Guardian"],
+                "custom_api_key": "sk-or-v1-...",
+                "custom_model_map": {"The Academic": "nvidia/nemotron..."}
             }
         }
 
@@ -118,13 +123,13 @@ def format_responses_for_critic(responses: List[Dict]) -> str:
         output_text += f"{header}\n{body}\n\n"
     return output_text
 
-async def real_stream_generator(query: str, selected_agents: List[str]):
+async def real_stream_generator(query: str, selected_agents: List[str], custom_api_key: Optional[str] = None, custom_model_map: Optional[Dict[str, str]] = None):
     # Initialize Tracer
     tracer = WorkflowTracer()
-    client = LLMClient()
     
-    # Log Start
-    tracer.log_step("Initialization", "System", query, f"Workflow Started via API. Agents: {selected_agents}")
+    # Log Start (Redaction handled by Tracer)
+    tracer.log_step("Initialization", "System", query, f"Workflow Started. Agents: {selected_agents}. Custom Config: {bool(custom_api_key)}")
+
 
     # --- Phase 1: Generators ---
     generator_tasks = []
@@ -137,11 +142,37 @@ async def real_stream_generator(query: str, selected_agents: List[str]):
          yield format_sse("error", {"message": "No valid agents selected."})
          return
 
+    # --- Apply Overrides ---
+    # Merge custom model map with default MODEL_MAP
+    # Default map uses keys like "generator_1", "critic", etc. 
+    # But user might pass agent names "The Academic" -> "model_id".
+    # Need to handle mapping carefully. 
+    # The default MODEL_MAP maps "generator_1" -> Model ID.
+    # The generator loop below assigns `model_key = f"generator_{i+1}"`.
+    # AND `agent_name` is "The Academic".
+    # User's custom_model_map will likely be {"The Academic": "custom/model-id"}.
+    # So we should prefer `custom_model_map[agent_name]` if it exists.
+    
+    # API Key Override
+    request_api_key = custom_api_key if custom_api_key else os.getenv("OPENROUTER_API_KEY")
+    if not request_api_key:
+        yield format_sse("error", {"message": "No API Key available."})
+        return
+        
+    # We need to monkeypatch or pass the key to LLMClient.
+    # LLMClient likely reads from os.getenv. We might need to modify LLMClient to accept a key
+    # or set the env var temporarily (not thread safe) or context var.
+    # Let's check LLMClient implementation. It's imported.
+    # Assuming LLMClient takes an optional api_key in init or generate.
+    # Wait, I haven't checked LLMClient yet. I might need to if it hardcodes os.getenv.
+    # For now, I will instantiate LLMClient with the key if possible.
+    # Let's assume I can pass it. If not, I'll need to update LLMClient.
+    client = LLMClient(api_key=request_api_key) 
+
     # Start all generators
     # We yield "start" events immediately
     for i, agent_name in enumerate(active_agents):
-        yield format_sse("generator_start", {"agent": agent_name})
-        
+        # Prepare Prompt
         persona_desc = PERSONA[agent_name]["description"]
         prompt = PROMPT_GENERATOR.format(
             persona_name=agent_name, 
@@ -150,10 +181,16 @@ async def real_stream_generator(query: str, selected_agents: List[str]):
         )
         
         # Determine model
-        # We try to map consistent model slots. 
-        # If we have agents [A, B], we can use generator_1, generator_2
-        model_key = f"generator_{i+1}" 
-        model_id = MODEL_MAP.get(model_key, MODEL_MAP.get("generator_1"))
+        model_id = None
+        if custom_model_map and agent_name in custom_model_map:
+            model_id = custom_model_map[agent_name]
+        
+        if not model_id:
+             model_key = f"generator_{i+1}" 
+             model_id = MODEL_MAP.get(model_key, MODEL_MAP.get("generator_1"))
+        
+        # Emit Start with Model Metadata
+        yield format_sse("generator_start", {"agent": agent_name, "model": model_id})
         
         # Launch task
         task = asyncio.create_task(client.generate(prompt, model=model_id))
@@ -211,7 +248,12 @@ async def real_stream_generator(query: str, selected_agents: List[str]):
             prompt = PROMPT_CRITIC.format(query=query, formatted_responses=formatted_text)
             
             try:
-                critic_json_str = await client.generate(prompt, schema=CriticOutput, model=MODEL_MAP["critic"])
+                # Check for critic override in custom_model_map
+                critic_model = MODEL_MAP["critic"]
+                if custom_model_map and "critic" in custom_model_map:
+                    critic_model = custom_model_map["critic"]
+                    
+                critic_json_str = await client.generate(prompt, schema=CriticOutput, model=critic_model)
                 critic_data = json.loads(critic_json_str)
                 
                 # Log Critic Result
@@ -264,7 +306,13 @@ async def real_stream_generator(query: str, selected_agents: List[str]):
         critiques=combined_critiques
     )
     
-    arch_json_str = await client.generate(prompt_arch, schema=ArchitectBlueprint, model=MODEL_MAP["architect"])
+    
+    # Check for architect override in custom_model_map
+    architect_model = MODEL_MAP["architect"]
+    if custom_model_map and "architect" in custom_model_map:
+        architect_model = custom_model_map["architect"]
+
+    arch_json_str = await client.generate(prompt_arch, schema=ArchitectBlueprint, model=architect_model)
     
     # Log Architect
     tracer.log_step("Architect", "Architect-Planner", prompt_arch, arch_json_str)
@@ -283,7 +331,11 @@ async def real_stream_generator(query: str, selected_agents: List[str]):
         context=best_response_content
     )
     
-    final_output = await client.generate(prompt_final, model=MODEL_MAP["finalizer"])
+    finalizer_model = MODEL_MAP["finalizer"]
+    if custom_model_map and "finalizer" in custom_model_map:
+        finalizer_model = custom_model_map["finalizer"]
+
+    final_output = await client.generate(prompt_final, model=finalizer_model)
     
     # Log Finalizer
     tracer.log_step("Finalizer", "Finalizer-Writer", prompt_final, final_output)
@@ -304,7 +356,75 @@ async def summon(request: SummonRequest):
     if USE_MOCK_MODE:
         return StreamingResponse(mock_stream_generator(request.selected_agents), media_type="text/event-stream")
     else:
-        return StreamingResponse(real_stream_generator(request.query, request.selected_agents), media_type="text/event-stream")
+        return StreamingResponse(real_stream_generator(request.query, request.selected_agents, request.custom_api_key, request.custom_model_map), media_type="text/event-stream")
+
+@app.get("/api/config-defaults")
+async def get_config_defaults():
+    """Returns the default configuration to the frontend."""
+    return {
+        "model_map": MODEL_MAP,
+        "personas": list(PERSONA.keys())
+    }
+
+class CheckModelRequest(BaseModel):
+    model_id: str
+    api_key: Optional[str] = None # Optional custom key to check against
+
+@app.post("/api/check-model")
+async def check_model(request: CheckModelRequest):
+    """
+    Validates a model ID by making a lightweight call to OpenRouter.
+    Returns 200 if valid, or raises HTTPException with specific status code.
+    """
+    if not request.model_id:
+        raise HTTPException(status_code=400, detail="Model ID is empty")
+    
+    # Use the custom key if provided, else default
+    client = LLMClient(api_key=request.api_key)
+    
+    try:
+        await client.check_connection(request.model_id)
+        return {"valid": True, "message": "Model verified"}
+    except APIStatusError as e:
+        # Pass through the specific status code from OpenRouter (400, 401, 402, 429...)
+        # e.status_code is available
+        print(f"Validation Error for {request.model_id}: {e}")
+        status = e.status_code or 400
+        error_body = e.body or {}
+        # Try to extract a clean message
+        detail_msg = error_body.get('error', {}).get('message', str(e))
+        
+        raise HTTPException(status_code=status, detail=detail_msg)
+    except Exception as e:
+        print(f"Generic Validation Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+class CheckCredentialsRequest(BaseModel):
+    api_key: str
+
+@app.post("/api/check-credentials")
+async def check_credentials(request: CheckCredentialsRequest):
+    """
+    Validates an API Key by attempting a check on a default cheap model.
+    """
+    if not request.api_key:
+         raise HTTPException(status_code=400, detail="API Key is empty")
+
+    client = LLMClient(api_key=request.api_key)
+    # Use a likely-available free or cheap model to test creds
+    test_model = "nvidia/nemotron-nano-12b-v2-vl:free" 
+    
+    try:
+        await client.check_connection(test_model)
+        return {"valid": True, "message": "Credentials verified"}
+    except APIStatusError as e:
+        status = e.status_code or 400
+        error_body = e.body or {}
+        detail_msg = error_body.get('error', {}).get('message', str(e))
+        raise HTTPException(status_code=status, detail=detail_msg)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     import uvicorn

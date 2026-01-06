@@ -15,6 +15,7 @@ export interface Session {
     // Full State Snapshot
     agents: Agent[];
     generatorStreams: Record<string, string>;
+    agentModels?: Record<string, string>; // Metadata: Model ID used for generation
     criticData: any;
     architectData: any;
     finalizerText: string;
@@ -34,6 +35,8 @@ export interface CouncilState {
 
     // Phase 1: Generators
     generatorStreams: Record<string, string>;
+    agentModels: Record<string, string>;
+    setAgentModel: (agent: string, model: string) => void;
     appendToGenerator: (agent: string, text: string) => void;
     resetGenerators: () => void;
 
@@ -58,9 +61,18 @@ export interface CouncilState {
     theme: 'dark' | 'light';
     toggleTheme: () => void;
 
+    // Settings
+    settings: {
+        apiKey: string;
+        modelOverrides: Record<string, string>;
+    };
+    setSettings: (settings: Partial<CouncilState['settings']>) => void;
+
     // Session Management
     sessions: Session[];
-    saveCurrentSession: () => void;
+    currentSessionId: string | null;
+    createSession: (query: string) => void;
+    updateCurrentSession: () => void;
     deleteSession: (id: string) => void;
     loadSession: (session: Session) => void;
 }
@@ -79,6 +91,15 @@ export const useCouncilStore = create<CouncilState>()(
             query: '',
             agents: INITIAL_AGENTS,
 
+            // Initial Settings
+            settings: {
+                apiKey: '',
+                modelOverrides: {}
+            },
+            setSettings: (newSettings) => set((state) => ({
+                settings: { ...state.settings, ...newSettings }
+            })),
+
             setQuery: (q) => set({ query: q }),
 
             toggleAgent: (id) => set((state) => ({
@@ -95,10 +116,15 @@ export const useCouncilStore = create<CouncilState>()(
             activePhase: 0,
 
             generatorStreams: {},
+            agentModels: {},
+            setAgentModel: (agent, model) => set((state) => ({
+                agentModels: { ...state.agentModels, [agent]: model }
+            })),
             appendToGenerator: (agent, text) => set((state) => {
                 return {
-                    activePhase: 1,
-                    isProcessing: true,
+                    // Note: activePhase setting is redundant if createSession sets it, 
+                    // but good for safety if called directly.
+                    // createSession handles initial activePhase.
                     generatorStreams: {
                         ...state.generatorStreams,
                         [agent]: (state.generatorStreams[agent] || '') + text
@@ -109,22 +135,14 @@ export const useCouncilStore = create<CouncilState>()(
 
             criticData: null,
             setCriticData: (data) => set((state) => {
-                // Merge strategies
                 const existing = state.criticData || {};
-
-                // If it's a completely new run (e.g. no existing winner), just take it. 
-                // BUT we are streaming batches. So we must merge.
-                // We'll prioritize the NEW winner/reasoning but MERGE scores and flaws.
-
                 return {
                     activePhase: 2,
                     criticData: {
                         ...existing,
-                        ...data, // Overwrite primitives (winner, reasoning) with latest batch (or keep first?)
-                        // Actually, generally we want to ACCUMULATE scores and flaws.
+                        ...data,
                         scores: { ...(existing.scores || {}), ...(data.scores || {}) },
                         flaws: { ...(existing.flaws || {}), ...(data.flaws || {}) },
-                        // For winner/reasoning: simplest is to just overwrite with latest batch's opinion
                         winner_id: data.winner_id || existing.winner_id,
                         reasoning: data.reasoning || existing.reasoning
                     }
@@ -146,56 +164,95 @@ export const useCouncilStore = create<CouncilState>()(
             resetAll: () => set((state) => ({
                 isProcessing: false,
                 activePhase: 0,
-                query: '', // Optional: clear query too
+                query: '',
                 generatorStreams: {},
+                agentModels: {},
                 criticData: null,
                 architectData: null,
                 finalizerText: '',
-                messages: []
+                messages: [],
+                currentSessionId: null
             })),
 
             theme: 'dark',
             toggleTheme: () => set((state) => ({ theme: state.theme === 'dark' ? 'light' : 'dark' })),
 
             sessions: [],
-            saveCurrentSession: () => set((state) => {
-                // Don't save empty sessions
-                if (!state.finalizerText && !state.criticData) return state;
+            currentSessionId: null,
 
+            createSession: (query) => set((state) => {
+                const newId = Date.now().toString();
                 const newSession: Session = {
-                    id: Date.now().toString(),
-                    query: state.query,
+                    id: newId,
+                    query: query,
                     date: new Date().toISOString(),
-                    summary: state.criticData?.winner_id ? `${state.criticData.winner_id} won.` : 'Council Adjourned.',
+                    summary: 'Council in session...',
                     agents: state.agents,
-                    generatorStreams: state.generatorStreams,
-                    criticData: state.criticData,
-                    architectData: state.architectData,
-                    finalizerText: state.finalizerText
+                    generatorStreams: {},
+                    agentModels: {},
+                    criticData: null,
+                    architectData: null,
+                    finalizerText: ''
                 };
+                return {
+                    currentSessionId: newId,
+                    sessions: [newSession, ...state.sessions],
+                    query: query,
+                    activePhase: 1,
+                    isProcessing: true,
+                    generatorStreams: {},
+                    agentModels: {},
+                    criticData: null,
+                    architectData: null,
+                    finalizerText: '',
+                    messages: []
+                };
+            }),
 
-                return { sessions: [newSession, ...state.sessions] };
+            updateCurrentSession: () => set((state) => {
+                if (!state.currentSessionId) return state;
+
+                const updatedSessions = state.sessions.map(session => {
+                    if (session.id === state.currentSessionId) {
+                        return {
+                            ...session,
+                            summary: state.criticData?.winner_id ? `${state.criticData.winner_id} won.` : 'Council Adjourned.',
+                            agents: state.agents,
+                            generatorStreams: state.generatorStreams,
+                            agentModels: state.agentModels,
+                            criticData: state.criticData,
+                            architectData: state.architectData,
+                            finalizerText: state.finalizerText
+                        };
+                    }
+                    return session;
+                });
+
+                return { sessions: updatedSessions };
             }),
 
             deleteSession: (id) => set((state) => ({
-                sessions: state.sessions.filter(s => s.id !== id)
+                sessions: state.sessions.filter(s => s.id !== id),
+                currentSessionId: state.currentSessionId === id ? null : state.currentSessionId
             })),
 
             loadSession: (session) => set({
+                currentSessionId: session.id,
                 query: session.query,
                 agents: session.agents,
                 generatorStreams: session.generatorStreams,
+                agentModels: session.agentModels || {},
                 criticData: session.criticData,
                 architectData: session.architectData,
                 finalizerText: session.finalizerText,
-                activePhase: 4, // Show completed state
+                activePhase: 4,
                 isProcessing: false
             })
         }),
         {
-            name: 'council-storage', // name of the item in the storage (must be unique)
-            storage: createJSONStorage(() => localStorage), // (optional) by default, 'localStorage' is used
-            partialize: (state) => ({ sessions: state.sessions, theme: state.theme }), // Only persist sessions and theme
+            name: 'council-storage',
+            storage: createJSONStorage(() => localStorage),
+            partialize: (state) => ({ sessions: state.sessions, theme: state.theme, settings: state.settings }),
         }
     )
 );

@@ -68,6 +68,9 @@ class SummonRequest(BaseModel):
 
 def format_sse(event_type: str, data: Any) -> str:
     """Helper to format SSE messages."""
+    # Inject type into data for frontend convenience
+    if isinstance(data, dict):
+        data["type"] = event_type
     return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
 # --- MOCK GENERATOR ---
@@ -131,6 +134,17 @@ async def real_stream_generator(query: str, selected_agents: List[str], custom_a
     tracer.log_step("Initialization", "System", query, f"Workflow Started. Agents: {selected_agents}. Custom Config: {bool(custom_api_key)}")
 
 
+    # Initialize Metrics
+    import time
+    workflow_start = time.perf_counter()
+    total_tokens = {"prompt": 0, "completion": 0, "total": 0}
+
+    # Helper to sum tokens
+    def add_usage(u):
+        total_tokens["prompt"] += u.get("prompt", 0)
+        total_tokens["completion"] += u.get("completion", 0)
+        total_tokens["total"] += u.get("total", 0)
+
     # --- Phase 1: Generators ---
     generator_tasks = []
     persona_keys = list(PERSONA.keys())
@@ -142,35 +156,13 @@ async def real_stream_generator(query: str, selected_agents: List[str], custom_a
          yield format_sse("error", {"message": "No valid agents selected."})
          return
 
-    # --- Apply Overrides ---
-    # Merge custom model map with default MODEL_MAP
-    # Default map uses keys like "generator_1", "critic", etc. 
-    # But user might pass agent names "The Academic" -> "model_id".
-    # Need to handle mapping carefully. 
-    # The default MODEL_MAP maps "generator_1" -> Model ID.
-    # The generator loop below assigns `model_key = f"generator_{i+1}"`.
-    # AND `agent_name` is "The Academic".
-    # User's custom_model_map will likely be {"The Academic": "custom/model-id"}.
-    # So we should prefer `custom_model_map[agent_name]` if it exists.
-    
     # API Key Override
     request_api_key = custom_api_key if custom_api_key else os.getenv("OPENROUTER_API_KEY")
-    if not request_api_key:
-        yield format_sse("error", {"message": "No API Key available."})
-        return
-        
-    # We need to monkeypatch or pass the key to LLMClient.
-    # LLMClient likely reads from os.getenv. We might need to modify LLMClient to accept a key
-    # or set the env var temporarily (not thread safe) or context var.
-    # Let's check LLMClient implementation. It's imported.
-    # Assuming LLMClient takes an optional api_key in init or generate.
-    # Wait, I haven't checked LLMClient yet. I might need to if it hardcodes os.getenv.
-    # For now, I will instantiate LLMClient with the key if possible.
-    # Let's assume I can pass it. If not, I'll need to update LLMClient.
     client = LLMClient(api_key=request_api_key) 
 
     # Start all generators
-    # We yield "start" events immediately
+    gen_start_times = {}
+
     for i, agent_name in enumerate(active_agents):
         # Prepare Prompt
         persona_desc = PERSONA[agent_name]["description"]
@@ -193,54 +185,56 @@ async def real_stream_generator(query: str, selected_agents: List[str], custom_a
         yield format_sse("generator_start", {"agent": agent_name, "model": model_id})
         
         # Launch task
+        gen_start_times[agent_name] = time.perf_counter()
         task = asyncio.create_task(client.generate(prompt, model=model_id))
-        generator_tasks.append((agent_name, task))
+        generator_tasks.append((agent_name, task, model_id))
 
     responses = []
     
-    # Await them. Note: This implementation waits for ALL to finish before streaming chunks?
-    # The requirement says "As the backend streams, the active tab should type out...".
-    # But basic implementation usually awaits full response. 
-    # To truly stream EACH agent in parallel is complex with a single SSE stream unless we multiplex.
-    # For MVP: We will await the FULL response of an agent, then stream it out quickly as a "chunk" or simulates streaming?
-    # OR better: The LLMClient.generate returns a string (not a stream). 
-    # So we have to wait for the full string.
-    # To simulate "streaming" to the UI, we can yield the full text or break it up.
-    # Yielding the full text as one chunk is fine for V1, but "Type out response in real time" suggests token streaming.
-    # Since LLMClient.generate is NOT streaming in the current codebase (it returns `await ...message.content`), 
-    # we cannot do true real-time token streaming from the LLM without refactoring `llm_client.py`.
-    # I will stick to "Wait for completion -> Stream result in chunks" to simulate the effect for now, 
-    # unless I am allowed to refactor LLMClient. 
-    # I'll stick to non-streaming LLM calls but streaming SSE to frontend.
-    
-    for agent_name, task in generator_tasks:
-        response_content = await task
-        # Log Generator Response
-        tracer.log_step("Generators", f"Generator-{agent_name}", query, response_content)
-        
-        # Simulate streaming chunks to frontend so it looks alive
-        # (or just send one big chunk if the UI helps)
-        # Let's send 1 chunk for now for efficiency, or split by lines.
-        yield format_sse("generator_chunk", {"agent": agent_name, "chunk": response_content})
-        responses.append({"persona": agent_name, "content": response_content})
+    try:
+        for agent_name, task, model_id in generator_tasks:
+            try:
+                response_content, usage = await task
+                duration = time.perf_counter() - gen_start_times[agent_name]
+                add_usage(usage)
+
+                # Log Generator Response
+                tracer.log_step("Generators", f"Generator-{agent_name}", query, response_content)
+                
+                yield format_sse("generator_chunk", {"agent": agent_name, "chunk": response_content})
+                # Metric Event
+                yield format_sse("generator_done", {
+                    "agent": agent_name, 
+                    "time_taken": duration, 
+                    "model": model_id, 
+                    "usage": usage
+                })
+
+                responses.append({"persona": agent_name, "content": response_content})
+            except Exception as e:
+                print(f"[ERROR] Generator Task Failed for {agent_name}: {e}")
+                # Continue to next agent? Or fail?
+                # We should probably continue but mark as failed.
+                yield format_sse("error", {"message": f"Agent {agent_name} failed: {e}"})
+
+    except asyncio.CancelledError:
+        print("[WARNING] Client disconnected during Generator Phase. Cancelling tasks...")
+        for _, t, _ in generator_tasks:
+            t.cancel()
+        raise
+    except Exception as e:
+        print(f"[ERROR] Generator Phase Loop Error: {e}")
+        raise
 
     # --- Phase 2: Critics ---
-    # Only run if > 1 agent or if we want critique on single agent (self-reflection?)
-    # Validating requirement: "If only 1 agent is selected, skip the 'Critic' phase"
-    
     critique_results = []
     best_response_content = ""
     
     if len(active_agents) > 1:
-        # Batching logic (simplified for < 5 agents usually)
         chunk_size = 3
         formatting_full_text = format_responses_for_critic(responses)
-        tracer.log_step("Critics", "System", "Batching Responses", formatting_full_text) # Log the input to critics
+        tracer.log_step("Critics", "System", "Batching Responses", formatting_full_text) 
         
-        # We'll just do one big critique for all if < 5, or stick to the batch logic
-        # Implementation from main.py assumes batching.
-        
-        # Create batches
         batches = [responses[i:i + chunk_size] for i in range(0, len(responses), chunk_size)]
         
         for idx, batch in enumerate(batches):
@@ -248,56 +242,57 @@ async def real_stream_generator(query: str, selected_agents: List[str], custom_a
             prompt = PROMPT_CRITIC.format(query=query, formatted_responses=formatted_text)
             
             try:
-                # Check for critic override in custom_model_map
                 critic_model = MODEL_MAP["critic"]
                 if custom_model_map and "critic" in custom_model_map:
                     critic_model = custom_model_map["critic"]
-                    
-                critic_json_str = await client.generate(prompt, schema=CriticOutput, model=critic_model)
+                
+                t0 = time.perf_counter()
+                critic_json_str, c_usage = await client.generate(prompt, schema=CriticOutput, model=critic_model)
+                duration = time.perf_counter() - t0
+                add_usage(c_usage)
+
                 critic_data = json.loads(critic_json_str)
                 
-                # Log Critic Result
                 tracer.log_step("Critics", f"Critic-Batch-{idx+1}", prompt, critic_json_str)
                 
-                # Identify winner stuff
+                # Enrich with metrics
+                critic_data["time_taken"] = duration
+                critic_data["model"] = critic_model
+                critic_data["usage"] = c_usage # Pass full usage object
+
                 winner_id = critic_data.get('winner_id', '')
-                yield format_sse("critic_result", critic_data) # Send full data to frontend
+                yield format_sse("critic_result", critic_data) 
                 
-                # Determine content for architect
-                # Naive matching of winner_id to content
-                batch_winner_content = batch[0]['content'] # Fallback
+                batch_winner_content = batch[0]['content'] 
                 for resp in batch:
                     if resp['persona'] in winner_id:
                         batch_winner_content = resp['content']
                         break
                 
                 critique_results.append(critic_data)
-                best_response_content = batch_winner_content # Last batch winner becomes "best" for now
+                best_response_content = batch_winner_content 
                 
             except Exception as e:
                 print(f"Critic Error: {e}")
-                # Use first as fallback
                 best_response_content = batch[0]['content']
 
     else:
-        # Skip critic
-        # We still need a "best response" for the Architect
         if responses:
             best_response_content = responses[0]['content']
-            # Send a dummy critic result saying "Skipped" or just nothing?
-            # User requirement: "auto-win that agent"
             auto_win = {
                 "winner_id": active_agents[0],
                 "rankings": active_agents,
                 "reasoning": "Solo execution - automatic winner.",
                 "scores": {active_agents[0]: 10},
-                "flaws": {active_agents[0]: "N/A"}
+                "flaws": {active_agents[0]: "N/A"},
+                "time_taken": 0,
+                "model": "N/A",
+                "usage": {"total": 0}
             }
             tracer.log_step("Critics", "Auto-Critic", "Single Agent", json.dumps(auto_win))
             yield format_sse("critic_result", auto_win)
 
     # --- Phase 3: Architect ---
-    # Needs critique data
     combined_critiques = json.dumps(critique_results) if critique_results else "[]"
     
     prompt_arch = PROMPT_ARCHITECT.format(
@@ -306,28 +301,30 @@ async def real_stream_generator(query: str, selected_agents: List[str], custom_a
         critiques=combined_critiques
     )
     
-    
-    # Check for architect override in custom_model_map
     architect_model = MODEL_MAP["architect"]
     if custom_model_map and "architect" in custom_model_map:
         architect_model = custom_model_map["architect"]
 
-    arch_json_str = await client.generate(prompt_arch, schema=ArchitectBlueprint, model=architect_model)
+    t0 = time.perf_counter()
+    arch_json_str, a_usage = await client.generate(prompt_arch, schema=ArchitectBlueprint, model=architect_model)
+    duration = time.perf_counter() - t0
+    add_usage(a_usage)
     
-    # Log Architect
     tracer.log_step("Architect", "Architect-Planner", prompt_arch, arch_json_str)
 
     try:
         arch_data = json.loads(arch_json_str)
+        arch_data["time_taken"] = duration
+        arch_data["model"] = architect_model
+        arch_data["usage"] = a_usage
         yield format_sse("architect_result", arch_data)
     except:
-        # Fallback if parsing fails
         yield format_sse("architect_result", {"structure": ["Error parsing architect"], "tone_guidelines": "N/A"})
 
     # --- Phase 4: Finalizer ---
     prompt_final = PROMPT_FINALIZER.format(
         query=query,
-        blueprint=arch_json_str, # Passing the raw string or json? prompt expects json string likely
+        blueprint=arch_json_str, 
         context=best_response_content
     )
     
@@ -335,21 +332,33 @@ async def real_stream_generator(query: str, selected_agents: List[str], custom_a
     if custom_model_map and "finalizer" in custom_model_map:
         finalizer_model = custom_model_map["finalizer"]
 
-    final_output = await client.generate(prompt_final, model=finalizer_model)
+    t0 = time.perf_counter()
+    final_output, f_usage = await client.generate(prompt_final, model=finalizer_model)
+    duration = time.perf_counter() - t0
+    add_usage(f_usage)
     
-    # Log Finalizer
     tracer.log_step("Finalizer", "Finalizer-Writer", prompt_final, final_output)
     
-    # Stream the final output
-    # Again, since client is not streaming, we simulate
     chunk_size = 50
     for i in range(0, len(final_output), chunk_size):
         chunk = final_output[i:i+chunk_size]
         yield format_sse("finalizer_chunk", {"chunk": chunk})
         await asyncio.sleep(0.01)
 
+    # Metrics for Finalizer
+    yield format_sse("finalizer_done", {
+        "time_taken": duration,
+        "model": finalizer_model,
+        "usage": f_usage
+    })
+
     tracer.finalize()
-    yield format_sse("done", {})
+    
+    total_duration = time.perf_counter() - workflow_start
+    yield format_sse("done", {
+        "total_execution_time": total_duration,
+        "total_tokens": total_tokens
+    })
 
 @app.post("/api/summon")
 async def summon(request: SummonRequest):

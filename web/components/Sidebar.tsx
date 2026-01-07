@@ -106,7 +106,7 @@ export function Sidebar() {
                             <div
                                 key={session.id}
                                 onClick={() => {
-                                    loadSession(session);
+                                    loadSession(session.id);
                                     router.push('/');
                                 }}
                                 className={`

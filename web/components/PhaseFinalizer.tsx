@@ -1,7 +1,7 @@
 'use client';
 
 import { useCouncilStore } from '@/store/councilStore';
-import { FileText, Copy, Check } from 'lucide-react';
+import { FileText, Copy, Check, Clock, Hash, Cpu } from 'lucide-react';
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
@@ -9,10 +9,13 @@ import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 
 export function PhaseFinalizer() {
-    const { finalizerText } = useCouncilStore();
+    const { currentSessionId, sessions } = useCouncilStore();
+    const currentSession = sessions.find(s => s.id === currentSessionId);
+    const finalizerText = currentSession?.finalizerText;
     const [copied, setCopied] = useState(false);
 
     const handleCopy = () => {
+        if (!finalizerText) return;
         navigator.clipboard.writeText(finalizerText);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
@@ -43,6 +46,24 @@ export function PhaseFinalizer() {
                     <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>{finalizerText}</ReactMarkdown>
                 </div>
             </div>
+
+            {/* Metrics Footer */}
+            {currentSession?.metrics?.finalizer && (
+                <div className="bg-[var(--bg-panel-secondary)] border-t border-[var(--border-base)] p-3 flex items-center justify-end gap-4 text-[10px] uppercase font-mono text-[var(--text-muted)] opacity-80">
+                    <div className="flex items-center gap-1.5" title="Execution Time">
+                        <Clock className="w-3 h-3" />
+                        <span>{currentSession.metrics.finalizer.time.toFixed(2)}s</span>
+                    </div>
+                    <div className="flex items-center gap-1.5" title="Total Tokens">
+                        <Hash className="w-3 h-3" />
+                        <span>{currentSession.metrics.finalizer.usage?.total || 0} Tok</span>
+                    </div>
+                    <div className="flex items-center gap-1.5" title="Model ID">
+                        <Cpu className="w-3 h-3" />
+                        <span>{currentSession.metrics.finalizer.model.split('/').pop()}</span>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

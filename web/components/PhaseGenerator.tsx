@@ -2,14 +2,17 @@
 
 import { useCouncilStore } from '@/store/councilStore';
 import { useState } from 'react';
-import { Activity, Maximize2, Minimize2, Cpu } from 'lucide-react';
+import { Activity, Maximize2, Minimize2, Cpu, Clock, Hash } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 
 export function PhaseGenerator() {
-    const { generatorStreams, agentModels } = useCouncilStore();
+    const { currentSessionId, sessions } = useCouncilStore();
+    const currentSession = sessions.find(s => s.id === currentSessionId);
+    const generatorStreams = currentSession?.generatorStreams || {};
+    const agentModels = currentSession?.agentModels || {};
     const activeAgentNames = Object.keys(generatorStreams);
     const [isExpanded, setIsExpanded] = useState<boolean>(true);
 
@@ -59,11 +62,27 @@ export function PhaseGenerator() {
                 )}
                 {isExpanded && <span className="inline-block w-2 h-4 bg-cyan-500 animate-pulse ml-1 align-middle"></span>}
 
-                {/* Model Footer */}
-                {currentTab && generatorStreams[currentTab] && agentModels[currentTab] && (
-                    <div className="mt-6 pt-3 border-t border-[var(--border-base)] border-dashed flex items-center justify-end gap-2 text-[10px] uppercase font-mono text-[var(--text-muted)] opacity-70">
-                        <Cpu className="w-3 h-3" />
-                        <span>Generated via {agentModels[currentTab]}</span>
+                {/* Metrics Footer */}
+                {currentTab && generatorStreams[currentTab] && (
+                    <div className="mt-6 pt-3 border-t border-[var(--border-base)] border-dashed flex items-center justify-end gap-4 text-[10px] uppercase font-mono text-[var(--text-muted)] opacity-80">
+                        {currentSession?.metrics?.generators?.[currentTab] && (
+                            <>
+                                <div className="flex items-center gap-1.5" title="Execution Time">
+                                    <Clock className="w-3 h-3" />
+                                    <span>{currentSession.metrics.generators[currentTab].time.toFixed(2)}s</span>
+                                </div>
+                                <div className="flex items-center gap-1.5" title="Total Tokens">
+                                    <Hash className="w-3 h-3" />
+                                    <span>{currentSession.metrics.generators[currentTab].usage?.total || 0} Tok</span>
+                                </div>
+                            </>
+                        )}
+                        {agentModels[currentTab] && (
+                            <div className="flex items-center gap-1.5" title="Model ID">
+                                <Cpu className="w-3 h-3" />
+                                <span>{agentModels[currentTab].split('/').pop()}</span>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

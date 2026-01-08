@@ -102,8 +102,8 @@ async def main():
     
     responses = []
     for persona, task in generator_tasks:
-        response = await task
-        print(f"[{persona}] Generated response.")
+        response, usage = await task
+        print(f"[{persona}] Generated response. Tokens: {usage['total']}")
         tracer.log_step("Generators", f"Generator-{persona}", query, response)
         responses.append({"persona": persona, "content": response})
 
@@ -130,7 +130,7 @@ async def main():
         )
         
         print(f"Running Critic on batch {i//chunk_size + 1}...")
-        critic_response_json = await client.generate(prompt, schema=CriticOutput, model=MODEL_MAP["critic"])
+        critic_response_json, c_usage = await client.generate(prompt, schema=CriticOutput, model=MODEL_MAP["critic"])
         tracer.log_step("Critics", f"Critic-Judge-Batch-{i//chunk_size + 1}", prompt, critic_response_json)
         
         try:
@@ -155,7 +155,7 @@ async def main():
                 "winner_id": winner_id,
                 "data": critic_data
             })
-            print(f"[Critic] Batch Winner: {winner_id}")
+            print(f"[Critic] Batch Winner: {winner_id}. Usage: {c_usage['total']}")
 
         except Exception as e:
             print(f"Error parsing critic JSON: {e}")
@@ -185,8 +185,8 @@ async def main():
         best_response=best_response_content,
         critiques=combined_critiques
     )
-    blueprint_json = await client.generate(prompt, schema=ArchitectBlueprint, model=MODEL_MAP["architect"])
-    print("[Architect] Blueprint created. Model used {}".format(MODEL_MAP["architect"]))
+    blueprint_json, a_usage = await client.generate(prompt, schema=ArchitectBlueprint, model=MODEL_MAP["architect"])
+    print("[Architect] Blueprint created. Model used {}. Usage: {}".format(MODEL_MAP["architect"], a_usage['total']))
     tracer.log_step("Architect", "Architect-Planner", prompt, blueprint_json)
 
     # --- Phase 4: Finalizer ---
@@ -196,8 +196,8 @@ async def main():
         blueprint=blueprint_json,
         context=best_response_content
     )
-    final_output = await client.generate(prompt, model=MODEL_MAP["finalizer"])
-    print("[Finalizer] Final answer generated. Model used {}".format(MODEL_MAP["finalizer"]))
+    final_output, f_usage = await client.generate(prompt, model=MODEL_MAP["finalizer"])
+    print("[Finalizer] Final answer generated. Model used {}. Usage: {}".format(MODEL_MAP["finalizer"], f_usage['total']))
     print("FINAL OUTPUT")
     print(final_output)
     tracer.log_step("Finalizer", "Finalizer-Writer", prompt, final_output)

@@ -1,10 +1,12 @@
 'use client';
 
 import { useCouncilStore } from '@/store/councilStore';
-import { CheckSquare, Info } from 'lucide-react';
+import { CheckSquare, Info, Clock, Hash, Cpu } from 'lucide-react';
 
 export function PhaseArchitect() {
-    const { architectData } = useCouncilStore();
+    const { currentSessionId, sessions } = useCouncilStore();
+    const currentSession = sessions.find(s => s.id === currentSessionId);
+    const architectData = currentSession?.architectData;
 
     if (!architectData) return null;
 
@@ -43,6 +45,12 @@ export function PhaseArchitect() {
                     </ul>
                 </div>
                 <div>
+                    <h4 className="text-[var(--text-muted)] text-xs font-bold uppercase mb-2">Critique Integration</h4>
+                    <div className="bg-[var(--bg-panel-secondary)] p-3 rounded border border-[var(--border-base)] text-xs text-indigo-700 dark:text-indigo-300">
+                        {architectData.critique_integration || 'No specific critique integration notes.'}
+                    </div>
+                </div>
+                <div>
                     <h4 className="text-[var(--text-muted)] text-xs font-bold uppercase mb-2">Tone Guidelines</h4>
                     <div className="bg-[var(--bg-panel-secondary)] p-3 rounded border border-[var(--border-base)] text-xs text-indigo-700 dark:text-indigo-300">
                         <Info className="w-3 h-3 inline mr-2 text-indigo-500" />
@@ -50,6 +58,23 @@ export function PhaseArchitect() {
                     </div>
                 </div>
             </div>
+
+            {currentSession?.metrics?.architect && (
+                <div className="mt-6 pt-3 border-t border-[var(--border-base)] border-dashed flex items-center justify-end gap-4 text-[10px] uppercase font-mono text-[var(--text-muted)] opacity-80">
+                    <div className="flex items-center gap-1.5" title="Execution Time">
+                        <Clock className="w-3 h-3" />
+                        <span>{currentSession.metrics.architect.time.toFixed(2)}s</span>
+                    </div>
+                    <div className="flex items-center gap-1.5" title="Total Tokens">
+                        <Hash className="w-3 h-3" />
+                        <span>{currentSession.metrics.architect.usage?.total || 0} Tok</span>
+                    </div>
+                    <div className="flex items-center gap-1.5" title="Model ID">
+                        <Cpu className="w-3 h-3" />
+                        <span>{currentSession.metrics.architect.model.split('/').pop()}</span>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

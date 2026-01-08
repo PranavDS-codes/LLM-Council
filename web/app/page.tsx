@@ -3,19 +3,26 @@
 import { AgentSelector } from '@/components/AgentSelector';
 import { CouncilTimeline } from '@/components/CouncilTimeline';
 import { useCouncilStore } from '@/store/councilStore';
-import { summonCouncil } from '@/lib/api';
-import { ArrowRight, Sparkles } from 'lucide-react';
+
+import { ArrowRight, Sparkles, Square } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 export default function Home() {
-  const { query, setQuery, isProcessing, agents, activePhase } = useCouncilStore();
+  const { query, setQuery, isStreaming, startSession, stopSession, currentSessionId, sessions } = useCouncilStore();
+  const currentSession = sessions.find(s => s.id === currentSessionId);
+  const activePhase = currentSession?.activePhase || 0;
 
   const handleSummon = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!query.trim() || isProcessing) return;
 
-    const selectedAgents = agents.filter(a => a.selected).map(a => a.id);
-    await summonCouncil(query, selectedAgents);
+    if (isStreaming) {
+      stopSession();
+      return;
+    }
+
+    if (!query.trim()) return;
+
+    await startSession();
   };
 
   // Scroll Animation Logic
@@ -78,7 +85,7 @@ export default function Home() {
                   placeholder="Enter your query for the council..."
                   rows={Math.min(10, Math.max(2, query.split('\n').length))}
                   className="flex-1 bg-transparent border-none focus:ring-0 text-[var(--text-main)] placeholder-[var(--text-muted)] px-4 py-3 resize-none min-h-[60px] max-h-[300px] overflow-y-auto"
-                  disabled={isProcessing}
+                  disabled={isStreaming}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
@@ -88,11 +95,14 @@ export default function Home() {
                 />
                 <button
                   type="submit"
-                  disabled={!query.trim() || isProcessing}
-                  className="p-3 bg-gradient-to-r from-cyan-600 to-indigo-600 rounded-md text-white hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-[0_0_15px_-3px_rgba(99,102,241,0.4)]"
+                  disabled={!query.trim() && !isStreaming}
+                  className={`p-3 rounded-md text-white transition-all shadow-[0_0_15px_-3px_rgba(99,102,241,0.4)] ${isStreaming
+                    ? 'bg-red-500 hover:bg-red-600 hover:shadow-[0_0_15px_-3px_rgba(239,68,68,0.4)]'
+                    : 'bg-gradient-to-r from-cyan-600 to-indigo-600 hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed'
+                    }`}
                 >
-                  {isProcessing ? (
-                    <Sparkles className="w-5 h-5 animate-spin" />
+                  {isStreaming ? (
+                    <Square className="w-5 h-5 fill-current" />
                   ) : (
                     <ArrowRight className="w-5 h-5" />
                   )}

@@ -106,10 +106,10 @@ function TimelineItem({
         if (phaseIndex === 4) {
             status = isStreaming ? 'streaming' : 'completed';
         } else {
-            // Actually if we are IN this phase, we are streaming it unless we moved past it.
-            // Since the backend moves sequentially, if activePhase == phaseIndex, we are working on it.
-            // BUT for intermediate phases, we stay on them until complete.
-            status = 'streaming';
+            // Check if we are actively streaming this phase.
+            // If the user stopped the stream (isStreaming == false), but activePhase == phaseIndex, it means we are stopped here.
+            // So we show 'completed' (or we could show a distinct 'stopped' state, but 'completed' icon is safer than infinite spinner).
+            status = isStreaming ? 'streaming' : 'completed';
         }
     }
 

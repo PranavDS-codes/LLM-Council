@@ -205,7 +205,8 @@ export const useCouncilStore = create<CouncilState>()(
                             const updatedSessions = [...currentState.sessions];
                             updatedSessions[sessionIndex] = {
                                 ...updatedSessions[sessionIndex],
-                                messages: [...updatedSessions[sessionIndex].messages, newMsg]
+                                messages: [...updatedSessions[sessionIndex].messages, newMsg],
+                                activePhase: updatedSessions[sessionIndex].activePhase // Keep phase but stop loading happens via isStreaming check
                             };
                             return { sessions: updatedSessions };
                         });
@@ -399,6 +400,9 @@ export const useCouncilStore = create<CouncilState>()(
                                                     model: data.model,
                                                     usage: data.usage
                                                 };
+                                                // Update Summary with snippet
+                                                const snippet = updatedSession.finalizerText ? updatedSession.finalizerText.slice(0, 100) + '...' : 'Council Mandate Fulfilled';
+                                                updatedSession.summary = snippet;
                                                 break;
 
                                             case 'done':
@@ -406,6 +410,10 @@ export const useCouncilStore = create<CouncilState>()(
                                                 if (data.total_execution_time) {
                                                     updatedSession.metrics.totalTime = data.total_execution_time;
                                                     updatedSession.metrics.totalTokens = data.total_tokens;
+                                                }
+                                                // Ensure summary is set if not already
+                                                if (updatedSession.summary === 'Council in session...') {
+                                                    updatedSession.summary = updatedSession.finalizerText ? updatedSession.finalizerText.slice(0, 100) + '...' : 'Council Adjourned';
                                                 }
                                                 break;
 
@@ -449,6 +457,8 @@ export const useCouncilStore = create<CouncilState>()(
                         console.error(error);
                         set({ isStreaming: false, abortController: null });
                     }
+                } finally {
+                    set({ isStreaming: false, abortController: null });
                 }
             }
         }),

@@ -1,53 +1,63 @@
 # LLM Council: Multi-Agent Consensus Engine
 
 > [!NOTE]
-> **Key Differentiator**: Unlike standard RAG or Chain-of-Thought systems, LLM Council enforces **adversarial consensus**. It spawns divergent AI personas (Skeptic, Academic, Futurist) to debate a query, ranks their outputs via an impartial Critic, and synthesizes a "Blueprint" before writing the final response. This reduces hallucination and bias by mimicking a human expert panel.
+> **Core Concept**: The LLM Council is not just a chatbot—it is an **Adversarial Consensus Engine**. By spawning divergent AI personas (Skeptic, Academic, Futurist) to debate a query, verifying outputs via an impartial Critic, and synthesizing a "Blueprint" before final drafting, it mimics a human expert panel to reduce hallucination and bias.
 
 ## 🧠 System Architecture & Determinisitic Control Flow
 
-The "Brain" of the system relies on a **4-Phase Waterfall Pipeline** implemented in `main.py`. The control flow combines parallel execution for diversity with sequential bottlenecks for quality control.
+The system employs a **Retrieval-Augmented Generation (RAG) independent** approach, relying purely on the cognitive latency of diverse foundational models. The "Brain" operates on a **4-Phase Waterfall Pipeline** implemented in `server.py` and `main.py`, combining parallel asynchronous execution with sequential quality gates.
 
 ### 1. Divergent Generation (Parallel Inference)
-*   **Mechanism**: Uses `asyncio.create_task` to spawn 3-5 concurrent execution threads.
-*   **Logic**: Each thread is initialized with a distinct system prompt (from `config.py`) representing a specific cognitive stance (e.g., "The Skeptic" vs "The Futurist").
-*   **Model Routing**: Distinct personas are routed to specific models defined in `MODEL_MAP` (e.g., `nvidia/nemotron` for generators, `deepseek-r1t` for reasoning).
+*   **Concurrency**: Uses `asyncio.create_task` to spawn concurrent execution threads for selected agents.
+*   **Persona Injection**: Each thread constructs a context window using a distinct system prompt from `config.py` (e.g., "The Skeptic" vs "The Futurist").
+*   **Model Routing**: Inference is routed to specific models defined in `MODEL_MAP`. This allows hybrid architectures (e.g., using `llama-3` for creative generation and `gpt-4o` for logic).
 
 ### 2. Adversarial Critique (Batch Processing)
 *   **Input**: Raw text outputs from Phase 1.
-*   **Logic**:
-    1.  Responses are grouped into batches using a sliding window (`chunk_size=3`).
-    2.  A specialized **Critic Agent** evaluates the batch.
-    3.  **Structured Output**: The Critic *must* return valid JSON adhering to the `CriticOutput` schema (Rankings, Flaws, Scores).
-*   **Agentic Logic**: The system parses the JSON to identify a `winner_id` and programmatically promotes the highest-scoring content to the next phase.
+*   **Batching Logic**: Responses are processed in sliding windows (`chunk_size=3`) to fit within the Critic's context window.
+*   **Structured Enforcement**: The Critic Agent is constrained to return a valid JSON object adhering to the `CriticOutput` schema.
+*   **Selection Algorithm**: The system programmatically parses the JSON to extract a `winner_id` and quantitative scores, promoting the highest-quality content to the synthesis phase.
 
 ### 3. Architectural Synthesis (Planner)
-*   **Input**: The "Winner" content from Phase 2 + Aggregated Critique JSONs.
-*   **Mechanism**: The **Architect Agent** does not write the final answer. Instead, it generates a **Blueprint**.
-*   **Schema**: `ArchitectBlueprint` containing:
-    *   `structure`: Ordered headers.
-    *   `missing_facts_to_add`: Data gaps identified in the critique.
-    *   `tone_guidelines`: Style enforcement.
+*   **Mechanism**: The **Architect Agent** does not write final prose. It generates a **Blueprint** (Schema: `ArchitectBlueprint`).
+*   **Refinement**: It explicitly requests `missing_facts_to_add` based on the Critic's feedback, effectively performing a self-correction loop before the final generation.
 
-### 4. Final Finalization (Execution)
-*   **Input**: Architect's Blueprint + Best Raw Context.
-*   **Action**: A high-fidelity model (`deepseek-r1t2`) executes the instructions strictly adhering to the Blueprint to produce the final artifact.
+### 4. Finalization (Execution)
+*   **Action**: A high-fidelity model executes the Architect's Blueprint.
+*   **Streaming**: The output is token-streamed via Server-Sent Events (SSE) to the consumer.
 
 ---
 
-## ⚙️ Data Engineering & Pipelines
+## ⚙️ AI/ML Engineering
 
-### Data Ingestion & IO
-*   **Entry**: CLI-based entry point accepting raw string queries.
-*   **Transport**: Data flows in-memory as native Python dictionaries (`responses` list) between async tasks.
+### 1. Robust Error Handling & Recovery
+The system implements a multi-layered defense against LLM instability:
+*   **422 Recovery Strategy**: If a model rejects a request (e.g., due to unsupported `response_format`), the `LLMClient` automatically catches the `APIStatusError`, strips the constraint, and retries the request transparently.
+*   **Fault Tolerance**: The Generator phase is wrapped in individual `try/catch` blocks. A failure in one agent (e.g., timeout) logs the error but does **not** crash the entire pipeline, ensuring partial results are still delivered.
 
-### Transformation Layer
-*   **Normalization**: `format_responses_for_critic()` standardizes diverse model outputs into a unified text block for the Critic context window, preventing format-based bias.
-*   **Serialization**: Heavy use of `Pydantic` models (`schemas.py`) to enforce type safety on LLM outputs. The system forces the LLM to "think in JSON."
+### 2. Structured Outputs (Pydantic Integration)
+Instead of parsing Regex from raw text, the system uses `Pydantic` models to define expected LLM outputs:
+*   `CriticOutput`: Enforces `scores` (int) and `flaws` (string) fields.
+*   `ArchitectBlueprint`: Enforces `structure` (list) and `tone_guidelines` (string).
+This forces the LLM to "think" in structured data, significantly reducing format errors.
 
-### Persistence (Flight Recorder)
-*   **Mechanism**: The system avoids traditional databases in favor of a **Trace Log** pattern.
-*   **Implementation**: `tracer.py` writes a sequential Markdown log (`logs/trace_{timestamp}.md`) capturing every prompt, raw model output, and internal decision state.
-*   **Significance**: Enables post-hoc debugging of the "chain of thought" without opaque binary blobs.
+### 3. Trace Logging (The "Flight Recorder")
+*   **Pattern**: Immutable Audit Logs.
+*   **Implementation**: `tracer.py` writes a sequential Markdown log (`logs/trace_{timestamp}.md`) capturing every prompt, raw model output (`temperature`, `tokens`), and internal decision state.
+*   **Utility**: Enables post-hoc analysis of "Chain of Thought" reasoning failures.
+
+---
+
+## 📊 Technical Metrics & Performance
+
+The backend is instrumented to capture high-resolution telemetry for every request:
+
+| Metric | Definition | Implementation |
+| :--- | :--- | :--- |
+| **Time to First Token (TTFT)** | Latency from request start to first byte received. | Measured via `time.perf_counter()` in `server.py` yield loops. |
+| **Total Latency** | End-to-end execution time per agent. | Aggregated in `MetricData` objects passed via SSE. |
+| **Token Usage** | Precise count of Prompt vs. Completion tokens. | Extracted directly from OpenRouter API `usage` headers. |
+| **Model Throughput** | Comparison of model generation speeds. | Logged alongside model IDs (e.g., `nvidia/nemotron` vs `deepseek-r1t`). |
 
 ---
 
@@ -55,39 +65,28 @@ The "Brain" of the system relies on a **4-Phase Waterfall Pipeline** implemented
 
 ### 1. `LLMClient` (`llm_client.py`)
 **Role**: The Gateway.
-*   **Mechanism**: Wraps `AsyncOpenAI` with custom error handling and schema enforcement.
+*   **Mechanism**: Wraps `AsyncOpenAI` with custom retry logic and schema enforcement.
 *   **Resilience**: Implements an **Exponential Backoff** strategy for HTTP 429/500/503 errors (`base_delay * 2^attempt`).
-*   **Mock Mode**: Includes a deterministic `_mock_generate` path for unit testing logic without API costs.
+*   **Mock Mode**: Determining logic (`_mock_generate`) allows for unit testing the orchestration logic without incurring API costs.
 
 ### 2. `WorkflowTracer` (`tracer.py`)
 **Role**: Observability Engine.
-*   **Mechanism**: atomic file writes to generate human-readable audit trails.
+*   **Mechanism**: Atomic file writes to generate human-readable audit trails.
 *   **I/O**: Captures `input_data` (Prompts) and `output_data` (JSON/Text) at every `log_step`.
 
-### 3. `CriticOutput` (`schemas.py`)
-**Role**: Structured Reasoning.
-*   **Mechanism**: A Pydantic model that forces the Critic model to quantize its evaluation.
-*   **Fields**:
-    *   `scores`: `Dict[str, int]` (Quantitative metric).
-    *   `flaws`: `Dict[str, str]` (Qualitative feedback).
-    *   `reasoning`: `str` (Chain of thought).
+### 3. `Server` (`server.py`)
+**Role**: Orchestrator.
+*   **Protocol**: Server-Sent Events (SSE).
+*   **Event Schema**:
+    *   `type`: Event identifier (e.g., `generator_chunk`, `critic_result`).
+    *   `data`: JSON payload containing content and metrics.
+    *   `retry`: Connection reconnection strategy.
 
 ---
 
-## 📊 Performance & Observability
+## 🚀 Quick Start (Headless)
 
-| Metric | Implementation Details |
-| :--- | :--- |
-| **Latency** | Handled via `asyncio` concurrency in Phase 1 (Generators run in parallel, 3-5x speedup over sequential). |
-| **Reliability** | `LLMClient` enforces `max_retries=3` on API calls. |
-| **Auditability** | Full request lifecycles are persisted in `logs/` as `.md` files. |
-| **Model Config** | Centralized `MODEL_MAP` in `config.py` allows hot-swapping inference backends per agent role. |
-
----
-
-## 🚀 Quick Start (Backend)
-
-To run the core consensus engine without the web interface:
+To run the core consensus engine directly:
 
 1.  **Environment Setup**:
     ```bash

@@ -14,6 +14,8 @@ interface ValidationState {
     message?: string;
 }
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 export default function ConfigPage() {
     const { settings, setSettings } = useCouncilStore();
     const [defaults, setDefaults] = useState<ConfigDefaults | null>(null);
@@ -34,7 +36,7 @@ export default function ConfigPage() {
             setDraftModelMap(settings.modelOverrides);
         }
 
-        fetch('http://localhost:8000/api/config-defaults')
+        fetch(`${API_BASE}/api/config-defaults`)
             .then(res => res.json())
             .then((data: ConfigDefaults) => {
                 setDefaults(data);
@@ -66,7 +68,7 @@ export default function ConfigPage() {
 
         setApiKeyStatus({ status: 'loading' });
         try {
-            const res = await fetch('http://localhost:8000/api/check-credentials', {
+            const res = await fetch(`${API_BASE}/api/check-credentials`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ api_key: draftApiKey })
@@ -108,7 +110,7 @@ export default function ConfigPage() {
             if (!modelId) return; // Skip empty
 
             try {
-                const res = await fetch('http://localhost:8000/api/check-model', {
+                const res = await fetch(`${API_BASE}/api/check-model`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({

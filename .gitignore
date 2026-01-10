@@ -9,3 +9,4 @@ wheels/
 llm_council/logs/
 # Virtual environments
 .venv
+interview_prep.md

@@ -9,9 +9,15 @@ export function KeepAlive() {
         // Initial ping
         const ping = () => {
             const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+            // Debug log less intrusive for prod
+            console.debug(`[Heartbeat] Pinging ${baseUrl}/health`);
+
             fetch(`${baseUrl}/health`)
-                .catch(err => console.debug('KeepAlive ping failed (expected during local dev if server off):', err));
+                .catch(err => console.debug('KeepAlive ping failed:', err));
         };
+
+        // Ping immediately on mount
+        ping();
 
         // Set interval
         const intervalId = setInterval(ping, PING_INTERVAL_MS);

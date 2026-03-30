@@ -35,7 +35,7 @@ MODEL_MAP = {
     "generator_2": "nvidia/nemotron-3-nano-30b-a3b:free",
     "generator_3": "z-ai/glm-4.5-air:free",
     "generator_4": "stepfun/step-3.5-flash:free", 
-    "generator_5": "openai/gpt-oss-120b:free",
+    "generator_5": "qwen/qwen3-next-80b-a3b-instruct:free",
     "critic": "nvidia/nemotron-3-super-120b-a12b:free", 
     "architect": "minimax/minimax-m2.5:free",
     "finalizer": "minimax/minimax-m2.5:free"

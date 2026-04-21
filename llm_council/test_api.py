@@ -1,7 +1,8 @@
 import asyncio
 import os
-from llm_client import LLMClient
-from config import MODEL_MAP
+
+from llm_council.config import MODEL_MAP
+from llm_council.llm_client import LLMClient
 
 async def test_connection():
     print("--- API Connection Test for All Agents ---")

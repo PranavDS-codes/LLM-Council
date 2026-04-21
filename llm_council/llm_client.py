@@ -1,21 +1,23 @@
 import asyncio
 import json
-import os
 import random
 from typing import Optional, Any
+
 from openai import AsyncOpenAI, APIStatusError
-from config import USE_MOCK_MODE, OPENROUTER_API_KEY, OPENROUTER_BASE_URL, MODEL_MAP, OPENROUTER_SITE_URL, OPENROUTER_APP_NAME
+
+from .settings import DEFAULT_MODEL_MAP, Settings, get_settings
 
 class LLMClient:
-    def __init__(self, api_key: Optional[str] = None):
-        self.mock_mode = USE_MOCK_MODE
+    def __init__(self, api_key: Optional[str] = None, settings: Optional[Settings] = None):
+        self.settings = settings or get_settings()
+        self.mock_mode = self.settings.use_mock_mode
         
         # Use passed key, or fallback to env, or None
-        target_key = api_key if api_key else OPENROUTER_API_KEY
+        target_key = api_key if api_key else self.settings.openrouter_api_key
         
         self.openai_client = AsyncOpenAI(
             api_key=target_key,
-            base_url=OPENROUTER_BASE_URL
+            base_url=self.settings.openrouter_base_url
         ) if not self.mock_mode else None
         
     async def generate(self, prompt: str, schema: Optional[Any] = None, model: Optional[str] = None):
@@ -54,14 +56,14 @@ class LLMClient:
             return f"Mock Response to: {prompt[:50]}...", usage
 
     async def _real_generate(self, prompt: str, schema: Optional[Any] = None, model: Optional[str] = None):
-        target_model = model if model else MODEL_MAP.get("generator_1", "nvidia/nemotron-nano-12b-v2-vl:free")
+        target_model = model if model else DEFAULT_MODEL_MAP.get("generator_1", "nvidia/nemotron-nano-12b-v2-vl:free")
         
         kwargs = {
             "model": target_model,
             "messages": [{"role": "user", "content": prompt}],
             "extra_headers": {
-                "HTTP-Referer": OPENROUTER_SITE_URL,
-                "X-Title": OPENROUTER_APP_NAME,
+                "HTTP-Referer": self.settings.openrouter_site_url,
+                "X-Title": self.settings.openrouter_app_name,
             },
             # Debug upstream body as requested/suggested
             # "debug": {"echo_upstream_body": True} 
@@ -147,8 +149,8 @@ class LLMClient:
             "messages": [{"role": "user", "content": "Hi"}],
             "max_tokens": 1,
             "extra_headers": {
-                "HTTP-Referer": OPENROUTER_SITE_URL,
-                "X-Title": OPENROUTER_APP_NAME,
+                "HTTP-Referer": self.settings.openrouter_site_url,
+                "X-Title": self.settings.openrouter_app_name,
             }
         }
         

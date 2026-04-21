@@ -1,9 +1,9 @@
 'use client';
 
 import { useCouncilStore } from '@/store/councilStore';
-import { User, Shield, Brain, Zap, Gavel } from 'lucide-react';
+import { type LucideIcon, User, Shield, Brain, Zap, Gavel } from 'lucide-react';
 
-const ICONS: Record<string, any> = {
+const ICONS: Record<string, LucideIcon> = {
     'The Academic': Brain,
     'The Layman': User,
     'The Skeptic': Shield, // Or maybe Eye?

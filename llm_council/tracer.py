@@ -1,17 +1,23 @@
 import os
 import datetime
-import json
+from pathlib import Path
 
 class WorkflowTracer:
-    def __init__(self, log_dir="logs"):
+    def __init__(self, enabled: bool = True, log_dir: str | Path = "logs"):
         """
         Initializes the WorkflowTracer with a unique log file.
         """
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
+        self.enabled = enabled
+        self.file = None
+        self.filename = None
+        if not self.enabled:
+            return
+
+        log_path = Path(log_dir)
+        log_path.mkdir(parents=True, exist_ok=True)
         
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.filename = os.path.join(log_dir, f"trace_{timestamp}.md")
+        self.filename = str(log_path / f"trace_{timestamp}.md")
         self.file = open(self.filename, "w", encoding="utf-8")
         
         # Write Header
@@ -23,6 +29,9 @@ class WorkflowTracer:
         """
         Logs a single step in the workflow to the Markdown file.
         """
+        if not self.enabled or not self.file:
+            return
+
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
 
         # --- REDACTION LOGIC ---
@@ -59,6 +68,8 @@ class WorkflowTracer:
         """
         Closes the log file.
         """
+        if not self.enabled or not self.file:
+            return self.filename
         self.file.write("\n# End of Trace\n")
         self.file.close()
         return self.filename

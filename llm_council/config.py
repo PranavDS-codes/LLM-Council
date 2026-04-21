@@ -1,42 +1,10 @@
-import os
-from dotenv import load_dotenv
+from .settings import DEFAULT_MODEL_MAP as MODEL_MAP
+from .settings import PERSONA, get_settings
 
-load_dotenv()
+settings = get_settings()
 
-# Configuration
-USE_MOCK_MODE = os.getenv("USE_MOCK_MODE", "True").lower() == "true"
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-OPENROUTER_SITE_URL = os.getenv("OPENROUTER_SITE_URL", "https://llm-council.local")
-OPENROUTER_APP_NAME = os.getenv("OPENROUTER_APP_NAME", "LLM Council")
-
-# Agent Definitions
-PERSONA = {
-    "The Academic": {
-        "description": "You are a rigorous researcher. Focus on definitions, historical context, theoretical frameworks, and first principles. Cite logical fallacies if present. Use formal, precise language. Prioritize accuracy and depth over simplicity."
-    },
-    "The Layman": {
-        "description": "You are a regular person who values common sense. You hate jargon. You want to know: 'How does this actually affect my daily life?' or 'What is the bottom line?' Use analogies, simple metaphors, and plain English. Be skeptical of over-complication."
-    },
-    "The Skeptic": {
-        "description": "You are a critical thinker who looks for the catch. Question the premise of the query. Look for edge cases, security risks, potential downsides, and hidden costs. Assume that if something sounds too good to be true, it probably is. Focus on risk mitigation."
-    },
-    "The Futurist": {
-        "description": "You are a visionary focused on the long-term horizon (5-50 years). Discuss trends, exponential technologies, and second-order effects. Ignore current constraints; focus on what is *possible*. Be optimistic but acknowledge disruptive potential."
-    },
-    "The Ethical Guardian": {
-        "description": "You are a moral philosopher and safety advocate. Focus on societal impact, bias, fairness, environmental cost, and human well-being. Ask 'Should we do this?' rather than 'Can we do this?' Prioritize safety and responsibility above efficiency."
-    }
-}
-
-# Model Assignment
-MODEL_MAP = {
-    "generator_1": "nvidia/nemotron-nano-12b-v2-vl:free", 
-    "generator_2": "nvidia/nemotron-3-nano-30b-a3b:free",
-    "generator_3": "z-ai/glm-4.5-air:free",
-    "generator_4": "stepfun/step-3.5-flash:free", 
-    "generator_5": "qwen/qwen3-next-80b-a3b-instruct:free",
-    "critic": "nvidia/nemotron-3-super-120b-a12b:free", 
-    "architect": "minimax/minimax-m2.5:free",
-    "finalizer": "minimax/minimax-m2.5:free"
-}
+USE_MOCK_MODE = settings.use_mock_mode
+OPENROUTER_API_KEY = settings.openrouter_api_key
+OPENROUTER_BASE_URL = settings.openrouter_base_url
+OPENROUTER_SITE_URL = settings.openrouter_site_url
+OPENROUTER_APP_NAME = settings.openrouter_app_name

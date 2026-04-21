@@ -2,29 +2,20 @@
 
 import { useEffect } from 'react';
 
-const PING_INTERVAL_MS = 14 * 60 * 1000; // 14 minutes
+import { getApiUrl } from '@/lib/api';
+
+const PING_INTERVAL_MS = 14 * 60 * 1000;
 
 export function KeepAlive() {
-    useEffect(() => {
-        // Initial ping
-        const ping = () => {
-            const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-            // Debug log less intrusive for prod
-            console.debug(`[Heartbeat] Pinging ${baseUrl}/health`);
+  useEffect(() => {
+    const ping = () => {
+      fetch(getApiUrl('/health')).catch(() => undefined);
+    };
 
-            fetch(`${baseUrl}/health`)
-                .catch(err => console.debug('KeepAlive ping failed:', err));
-        };
+    ping();
+    const intervalId = setInterval(ping, PING_INTERVAL_MS);
+    return () => clearInterval(intervalId);
+  }, []);
 
-        // Ping immediately on mount
-        ping();
-
-        // Set interval
-        const intervalId = setInterval(ping, PING_INTERVAL_MS);
-
-        // Clean up
-        return () => clearInterval(intervalId);
-    }, []);
-
-    return null; // Render nothing
+  return null;
 }

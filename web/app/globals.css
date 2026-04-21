@@ -2,52 +2,42 @@
 @import "katex/dist/katex.min.css";
 @plugin "@tailwindcss/typography";
 
-
 :root {
-  /* Default to Dark Mode (Cyberpunk aesthetic requires dark first) */
-  --bg-app: #020617;
-  /* slate-950 */
-  --bg-panel: #1e293b;
-  /* slate-800 */
-  --bg-panel-secondary: #0f172a;
-  /* slate-900 */
-  --border-base: #334155;
-  /* slate-700 */
-  --text-main: #ffffff;
-  /* white */
-  --text-muted: #cbd5e1;
-  /* slate-300 */
-  --accent-glow: 15, 23, 42;
-  /* slate-900 */
+  --bg-app: #eff6ff;
+  --bg-panel: rgba(255, 255, 255, 0.88);
+  --bg-panel-secondary: rgba(241, 245, 249, 0.95);
+  --border-base: rgba(148, 163, 184, 0.35);
+  --text-main: #0f172a;
+  --text-muted: #475569;
+  --accent-glow: 191, 219, 254;
 }
 
 :root[data-theme='dark'] {
-  /* Dark Mode Overrides */
   --bg-app: #020617;
-  /* slate-950 */
-  --bg-panel: #1e293b;
-  /* slate-800 - Lighter than bg-app for differentiation */
-  --bg-panel-secondary: #0f172a;
-  /* slate-900 */
-  --border-base: #334155;
-  /* slate-700 */
+  --bg-panel: rgba(15, 23, 42, 0.88);
+  --bg-panel-secondary: rgba(15, 23, 42, 0.98);
+  --border-base: rgba(71, 85, 105, 0.55);
   --text-main: #ffffff;
-  /* white - Max brightness */
   --text-muted: #cbd5e1;
-  /* slate-300 - Brighter muted text */
   --accent-glow: 15, 23, 42;
-  /* slate-900 */
 }
 
 body {
   color: var(--text-main);
-  background: var(--bg-app);
-  font-family: 'Courier New', Courier, monospace;
+  background:
+    radial-gradient(circle at top left, rgba(56, 189, 248, 0.16), transparent 32%),
+    radial-gradient(circle at top right, rgba(99, 102, 241, 0.18), transparent 28%),
+    linear-gradient(180deg, rgba(var(--accent-glow), 0.2), transparent 28%),
+    var(--bg-app);
+  font-family: 'Avenir Next', 'IBM Plex Sans', 'Segoe UI', sans-serif;
   overflow-x: hidden;
   transition: background-color 0.3s ease, color 0.3s ease;
 }
 
-/* Custom Scrollbar */
+main {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent);
+}
+
 ::-webkit-scrollbar {
   width: 8px;
 }

@@ -1,25 +1,26 @@
 import type { Metadata } from 'next';
-import './globals.css';
-import { Sidebar } from '@/components/Sidebar';
 
 import { KeepAlive } from '@/components/KeepAlive';
+import { Sidebar } from '@/components/Sidebar';
+
+import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'LLM Council',
-  description: 'Multi-Agent Debate System',
+  title: 'LLM Council Mission Control',
+  description: 'A multi-agent council for critique, synthesis, and trustworthy final answers.',
 };
 
 export default function RootLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-}) {
+}>) {
   return (
     <html lang="en">
-      <body className="flex h-screen overflow-hidden text-slate-100 antialiased selection:bg-cyan-500/30">
+      <body className="flex h-screen overflow-hidden antialiased selection:bg-cyan-500/30">
         <KeepAlive />
         <Sidebar />
-        <main className="flex-1 relative overflow-y-auto">
+        <main className="relative flex-1 overflow-y-auto">
           {children}
         </main>
       </body>

@@ -5,6 +5,7 @@ import { AlertTriangle, ArrowRight, Square } from 'lucide-react';
 
 import { AgentSelector } from '@/components/AgentSelector';
 import { CouncilTimeline } from '@/components/CouncilTimeline';
+import { getSelectedAgents } from '@/lib/councilMeta';
 import { useCouncilStore } from '@/store/councilStore';
 
 export default function Home() {
@@ -20,7 +21,8 @@ export default function Home() {
   } = useCouncilStore();
   const currentSession = sessions.find((session) => session.id === currentSessionId);
   const activePhase = currentSession?.activePhase || 0;
-  const selectedCount = agents.filter((agent) => agent.selected).length;
+  const selectedCount = getSelectedAgents(agents).length;
+  const hasActiveSession = activePhase > 0;
 
   const handleSummon = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -53,7 +55,7 @@ export default function Home() {
     return () => main.removeEventListener('scroll', handleScroll);
   }, []);
 
-  const shouldShrink = activePhase > 0 || scrollState;
+  const shouldShrink = hasActiveSession || scrollState;
   const latestIssue = currentSession?.issues[currentSession.issues.length - 1];
   const canSubmit = query.trim().length > 0 && selectedCount > 0;
 
@@ -84,7 +86,7 @@ export default function Home() {
           <form onSubmit={handleSummon} className="mt-8 space-y-5">
             <div
               className={`transition-all duration-500 ${
-                activePhase > 0 || scrollState
+                hasActiveSession || scrollState
                   ? 'hidden scale-90 opacity-60 md:block md:pointer-events-none'
                   : 'opacity-100'
               }`}
@@ -92,78 +94,102 @@ export default function Home() {
               <AgentSelector />
             </div>
 
-            <div className="mx-auto flex max-w-2xl flex-wrap items-center justify-center gap-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
-              <span className="rounded-full border border-[var(--border-base)] bg-[var(--bg-panel)] px-3 py-1.5">
-                {selectedCount} agent{selectedCount === 1 ? '' : 's'} selected
-              </span>
-              <span className="rounded-full border border-[var(--border-base)] bg-[var(--bg-panel)] px-3 py-1.5">
-                {isStreaming ? 'Live session in progress' : 'Ready to brief'}
-              </span>
-              {currentSession?.status === 'stopped' && (
-                <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-amber-500">
-                  Session interrupted
+            {!hasActiveSession && (
+              <div className="mx-auto flex max-w-2xl flex-wrap items-center justify-center gap-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                <span className="rounded-full border border-[var(--border-base)] bg-[var(--bg-panel)] px-3 py-1.5">
+                  {selectedCount} agent{selectedCount === 1 ? '' : 's'} selected
                 </span>
-              )}
-            </div>
+                <span className="rounded-full border border-[var(--border-base)] bg-[var(--bg-panel)] px-3 py-1.5">
+                  {isStreaming ? 'Live session in progress' : 'Ready to brief'}
+                </span>
+                {currentSession?.status === 'stopped' && (
+                  <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-amber-500">
+                    Session interrupted
+                  </span>
+                )}
+              </div>
+            )}
 
-            <div
-              className={`group relative mx-auto max-w-3xl origin-top transition-all duration-700 ${
-                shouldShrink ? 'scale-[0.97]' : 'scale-100'
-              }`}
-            >
-              <div className="absolute -inset-[1px] rounded-[28px] bg-gradient-to-r from-cyan-500/30 via-sky-400/20 to-indigo-500/30 blur-sm transition duration-700 group-hover:opacity-100" />
-              <div className="relative overflow-hidden rounded-[28px] border border-[var(--border-base)] bg-[var(--bg-panel)]/95 p-3 shadow-[0_28px_80px_-40px_rgba(15,23,42,0.9)]">
-                <div className="mb-3 flex items-center justify-between px-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
-                  <span>Mandate</span>
-                  <span>{query.trim().length}/4000</span>
-                </div>
-                <div className="flex items-end gap-3">
-                  <textarea
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder="Enter the question, decision, or topic you want the council to pressure-test..."
-                    rows={Math.min(10, Math.max(2, query.split('\n').length))}
-                    className="min-h-[92px] max-h-[320px] flex-1 resize-none overflow-y-auto bg-transparent px-4 py-3 text-[var(--text-main)] placeholder-[var(--text-muted)] outline-none"
-                    disabled={isStreaming}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' && !event.shiftKey) {
-                        event.preventDefault();
-                        void handleSummon(event);
-                      }
-                    }}
-                  />
+            {hasActiveSession && (
+              <div className="mx-auto flex max-w-2xl flex-wrap items-center justify-center gap-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                {isStreaming && (
                   <button
-                    type="submit"
-                    disabled={!isStreaming && !canSubmit}
-                    className={`mb-2 inline-flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold text-white transition-all ${
-                      isStreaming
-                        ? 'bg-red-500 hover:bg-red-600'
-                        : 'bg-gradient-to-r from-cyan-600 to-indigo-600 hover:-translate-y-0.5 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50'
-                    }`}
+                    type="button"
+                    onClick={stopSession}
+                    className="inline-flex items-center gap-2 rounded-full border border-red-500/40 bg-red-500/10 px-4 py-2 text-red-200 transition-colors hover:bg-red-500/20"
                   >
-                    {isStreaming ? (
-                      <>
-                        <Square className="h-4 w-4 fill-current" />
-                        Stop
-                      </>
-                    ) : (
-                      <>
-                        Summon
-                        <ArrowRight className="h-4 w-4" />
-                      </>
-                    )}
+                    <Square className="h-3.5 w-3.5 fill-current" />
+                    Stop session
                   </button>
-                </div>
-                <div className="mt-2 flex flex-wrap items-center justify-between gap-3 px-2 text-sm text-[var(--text-muted)]">
-                  <span>Press Enter to launch. Shift+Enter adds a new line.</span>
-                  {!canSubmit && !isStreaming && (
-                    <span className="text-amber-500">
-                      Pick at least one agent and enter a prompt.
-                    </span>
-                  )}
+                )}
+                {currentSession?.status === 'stopped' && (
+                  <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-amber-500">
+                    Session interrupted
+                  </span>
+                )}
+              </div>
+            )}
+
+            {!hasActiveSession && (
+              <div
+                className={`group relative mx-auto max-w-3xl origin-top transition-all duration-700 ${
+                  shouldShrink ? 'scale-[0.97]' : 'scale-100'
+                }`}
+              >
+                <div className="absolute -inset-[1px] rounded-[28px] bg-gradient-to-r from-cyan-500/30 via-sky-400/20 to-indigo-500/30 blur-sm transition duration-700 group-hover:opacity-100" />
+                <div className="relative overflow-hidden rounded-[28px] border border-[var(--border-base)] bg-[var(--bg-panel)]/95 p-3 shadow-[0_28px_80px_-40px_rgba(15,23,42,0.9)]">
+                  <div className="mb-3 flex items-center justify-between px-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                    <span>Mandate</span>
+                    <span>{query.trim().length}/4000</span>
+                  </div>
+                  <div className="flex items-end gap-3">
+                    <textarea
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                      placeholder="Enter the question, decision, or topic you want the council to pressure-test..."
+                      rows={Math.min(10, Math.max(2, query.split('\n').length))}
+                      className="min-h-[92px] max-h-[320px] flex-1 resize-none overflow-y-auto bg-transparent px-4 py-3 text-[var(--text-main)] placeholder-[var(--text-muted)] outline-none"
+                      disabled={isStreaming}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && !event.shiftKey) {
+                          event.preventDefault();
+                          void handleSummon(event);
+                        }
+                      }}
+                    />
+                    <button
+                      type="submit"
+                      disabled={!isStreaming && !canSubmit}
+                      className={`mb-2 inline-flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold text-white transition-all ${
+                        isStreaming
+                          ? 'bg-red-500 hover:bg-red-600'
+                          : 'bg-gradient-to-r from-cyan-600 to-indigo-600 hover:-translate-y-0.5 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50'
+                      }`}
+                    >
+                      {isStreaming ? (
+                        <>
+                          <Square className="h-4 w-4 fill-current" />
+                          Stop
+                        </>
+                      ) : (
+                        <>
+                          Summon
+                          <ArrowRight className="h-4 w-4" />
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-3 px-2 text-sm text-[var(--text-muted)]">
+                    <span>Press Enter to launch. Shift+Enter adds a new line.</span>
+                    {!canSubmit && !isStreaming && (
+                      <span className="text-amber-500">
+                        Pick at least one agent and enter a prompt.
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </form>
 
           {latestIssue && (

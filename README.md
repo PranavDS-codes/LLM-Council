@@ -33,9 +33,10 @@ Copy `.env.example` to `.env` at the repo root or `llm_council/.env`.
 Important variables:
 
 - `OPENROUTER_API_KEY`: required for live model calls
-- `USE_MOCK_MODE=true|false`: run fake responses instead of real API calls
+- `USE_MOCK_MODE=true|false`: run fake responses instead of real API calls. Defaults to `false`.
 - `ENABLE_TRACE_LOGS=true|false`: write markdown traces to `llm_council/logs/`
 - `CORS_ALLOW_ORIGINS`: comma-separated allowed frontend origins
+- `CORS_ALLOW_ORIGIN_REGEX`: optional regex for preview domains such as Vercel previews
 
 ## Backend Setup
 
@@ -66,6 +67,38 @@ npm run dev
 ```
 
 By default the frontend expects the backend at `http://localhost:8000`. Override with `NEXT_PUBLIC_API_URL`.
+
+## Deployment
+
+### Backend on Render
+
+This repo now includes [render.yaml](/Users/pranavpant/Desktop/code/LLM%20Council/render.yaml) for a Python web service.
+
+Render requirements for this app:
+
+- Bind on `0.0.0.0`
+- Use the platform `PORT`
+- Set `OPENROUTER_API_KEY`
+- Set CORS so the Vercel frontend can call the API
+
+Suggested environment values:
+
+- `OPENROUTER_API_KEY`: your real OpenRouter key
+- `OPENROUTER_SITE_URL`: your Vercel production URL or custom frontend domain
+- `OPENROUTER_APP_NAME`: `LLM Council`
+- `USE_MOCK_MODE`: `false`
+- `CORS_ALLOW_ORIGINS`: your production frontend URL, for example `https://your-app.vercel.app`
+- `CORS_ALLOW_ORIGIN_REGEX`: optional preview support, for example `^https://.*\.vercel\.app$`
+
+### Frontend on Vercel
+
+Deploy the `web/` directory as its own Vercel project.
+
+Required environment variable:
+
+- `NEXT_PUBLIC_API_URL`: your Render backend URL, for example `https://llm-council-api.onrender.com`
+
+For Git-based monorepo deploys, set the Vercel project Root Directory to `web`.
 
 ## Quality Gates
 

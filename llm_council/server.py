@@ -20,6 +20,7 @@ app = FastAPI(title="LLM Council API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_allow_origins),
+    allow_origin_regex=settings.cors_allow_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -122,7 +123,12 @@ async def check_credentials(request: CheckCredentialsRequest) -> dict[str, Any]:
 def run() -> None:
     import uvicorn
 
-    uvicorn.run("llm_council.server:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(
+        "llm_council.server:app",
+        host="0.0.0.0",
+        port=settings.port,
+        reload=settings.reload,
+    )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,25 @@
+services:
+  - name: llm-council-api
+    type: web
+    runtime: python
+    plan: free
+    buildCommand: pip install .
+    startCommand: python -m llm_council.server
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.7
+      - key: USE_MOCK_MODE
+        value: false
+      - key: ENABLE_TRACE_LOGS
+        value: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_SITE_URL
+        sync: false
+      - key: OPENROUTER_APP_NAME
+        value: LLM Council
+      - key: CORS_ALLOW_ORIGINS
+        sync: false
+      - key: CORS_ALLOW_ORIGIN_REGEX
+        sync: false

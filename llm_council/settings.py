@@ -28,6 +28,14 @@ def _env_csv(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
     return values or default
 
 
+def _env_optional(name: str) -> str | None:
+    raw = os.getenv(name)
+    if raw is None:
+        return None
+    value = raw.strip()
+    return value or None
+
+
 PERSONA: Final[dict[str, dict[str, str]]] = {
     "The Academic": {
         "description": "You are a rigorous researcher. Focus on definitions, historical context, theoretical frameworks, and first principles. Cite logical fallacies if present. Use formal, precise language. Prioritize accuracy and depth over simplicity."
@@ -66,19 +74,27 @@ class Settings:
     openrouter_site_url: str
     openrouter_app_name: str
     cors_allow_origins: tuple[str, ...]
+    cors_allow_origin_regex: str | None
     enable_trace_logs: bool
     trace_log_dir: Path
+    port: int
+    reload: bool
 
 
 def get_settings() -> Settings:
     return Settings(
-        use_mock_mode=_env_flag("USE_MOCK_MODE", True),
+        use_mock_mode=_env_flag("USE_MOCK_MODE", False),
         openrouter_api_key=os.getenv("OPENROUTER_API_KEY"),
         openrouter_base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
         openrouter_site_url=os.getenv("OPENROUTER_SITE_URL", "https://llm-council.local"),
         openrouter_app_name=os.getenv("OPENROUTER_APP_NAME", "LLM Council"),
-        cors_allow_origins=_env_csv("CORS_ALLOW_ORIGINS", ("http://localhost:3000",)),
+        cors_allow_origins=_env_csv(
+            "CORS_ALLOW_ORIGINS",
+            ("http://localhost:3000", "http://127.0.0.1:3000"),
+        ),
+        cors_allow_origin_regex=_env_optional("CORS_ALLOW_ORIGIN_REGEX"),
         enable_trace_logs=_env_flag("ENABLE_TRACE_LOGS", False),
         trace_log_dir=Path(os.getenv("TRACE_LOG_DIR", str(PACKAGE_DIR / "logs"))),
+        port=int(os.getenv("PORT", "8000")),
+        reload=_env_flag("RELOAD", False),
     )
-

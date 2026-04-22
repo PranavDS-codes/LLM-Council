@@ -19,6 +19,12 @@ npm run dev
 
 The app expects the backend at `http://localhost:8000` unless `NEXT_PUBLIC_API_URL` is set.
 
+For Vercel deploys, create a project that points at the `web/` directory and set:
+
+```bash
+NEXT_PUBLIC_API_URL=https://your-render-service.onrender.com
+```
+
 ## Checks
 
 ```bash

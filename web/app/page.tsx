@@ -61,40 +61,34 @@ export default function Home() {
 
   return (
     <div className="min-h-full">
-      <section
-        className={`sticky top-0 z-20 border-b border-[var(--border-base)] bg-[var(--bg-app)]/85 backdrop-blur-xl transition-all duration-700 ${
-          shouldShrink ? 'py-4 shadow-[0_18px_60px_-30px_rgba(15,23,42,0.7)]' : 'py-16'
-        }`}
-      >
-        <div className="mx-auto max-w-4xl px-6 text-center">
-          {activePhase === 0 && !scrollState && (
-            <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
-              <div className="mx-auto mb-4 inline-flex items-center gap-2 rounded-full border border-cyan-500/20 bg-cyan-500/10 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-500">
-                Council-grade synthesis
+      {!hasActiveSession && (
+        <section
+          className={`sticky top-0 z-20 border-b border-[var(--border-base)] bg-[var(--bg-app)]/85 backdrop-blur-xl transition-all duration-700 ${
+            shouldShrink ? 'py-4 shadow-[0_18px_60px_-30px_rgba(15,23,42,0.7)]' : 'py-16'
+          }`}
+        >
+          <div className="mx-auto max-w-4xl px-6 text-center">
+            {activePhase === 0 && !scrollState && (
+              <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
+                <div className="mx-auto mb-4 inline-flex items-center gap-2 rounded-full border border-cyan-500/20 bg-cyan-500/10 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-500">
+                  Council-grade synthesis
+                </div>
+                <h1 className="bg-gradient-to-r from-cyan-400 via-sky-300 to-indigo-500 bg-clip-text text-4xl font-black tracking-[-0.08em] text-transparent md:text-6xl">
+                  ASSEMBLE THE COUNCIL
+                </h1>
+                <p className="mx-auto mt-4 max-w-2xl text-base text-[var(--text-muted)] md:text-lg">
+                  Launch a multi-agent review board that argues from competing perspectives,
+                  critiques itself, and delivers a tighter final answer with visible reasoning
+                  and metrics.
+                </p>
               </div>
-              <h1 className="bg-gradient-to-r from-cyan-400 via-sky-300 to-indigo-500 bg-clip-text text-4xl font-black tracking-[-0.08em] text-transparent md:text-6xl">
-                ASSEMBLE THE COUNCIL
-              </h1>
-              <p className="mx-auto mt-4 max-w-2xl text-base text-[var(--text-muted)] md:text-lg">
-                Launch a multi-agent review board that argues from competing perspectives,
-                critiques itself, and delivers a tighter final answer with visible reasoning
-                and metrics.
-              </p>
-            </div>
-          )}
+            )}
 
-          <form onSubmit={handleSummon} className="mt-8 space-y-5">
-            <div
-              className={`transition-all duration-500 ${
-                hasActiveSession || scrollState
-                  ? 'hidden scale-90 opacity-60 md:block md:pointer-events-none'
-                  : 'opacity-100'
-              }`}
-            >
-              <AgentSelector />
-            </div>
+            <form onSubmit={handleSummon} className="mt-8 space-y-5">
+              <div className="transition-all duration-500">
+                <AgentSelector />
+              </div>
 
-            {!hasActiveSession && (
               <div className="mx-auto flex max-w-2xl flex-wrap items-center justify-center gap-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
                 <span className="rounded-full border border-[var(--border-base)] bg-[var(--bg-panel)] px-3 py-1.5">
                   {selectedCount} agent{selectedCount === 1 ? '' : 's'} selected
@@ -108,29 +102,7 @@ export default function Home() {
                   </span>
                 )}
               </div>
-            )}
 
-            {hasActiveSession && (
-              <div className="mx-auto flex max-w-2xl flex-wrap items-center justify-center gap-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
-                {isStreaming && (
-                  <button
-                    type="button"
-                    onClick={stopSession}
-                    className="inline-flex items-center gap-2 rounded-full border border-red-500/40 bg-red-500/10 px-4 py-2 text-red-200 transition-colors hover:bg-red-500/20"
-                  >
-                    <Square className="h-3.5 w-3.5 fill-current" />
-                    Stop session
-                  </button>
-                )}
-                {currentSession?.status === 'stopped' && (
-                  <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-amber-500">
-                    Session interrupted
-                  </span>
-                )}
-              </div>
-            )}
-
-            {!hasActiveSession && (
               <div
                 className={`group relative mx-auto max-w-3xl origin-top transition-all duration-700 ${
                   shouldShrink ? 'scale-[0.97]' : 'scale-100'
@@ -189,22 +161,22 @@ export default function Home() {
                   </div>
                 </div>
               </div>
-            )}
-          </form>
+            </form>
 
-          {latestIssue && (
-            <div className="mx-auto mt-5 max-w-3xl rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-left text-sm text-amber-100">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="mt-0.5 h-4 w-4 text-amber-400" />
-                <div>
-                  <div className="font-semibold text-amber-200">Council recovered from an issue</div>
-                  <p className="mt-1 text-amber-100/80">{latestIssue.message}</p>
+            {latestIssue && (
+              <div className="mx-auto mt-5 max-w-3xl rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-left text-sm text-amber-100">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 text-amber-400" />
+                  <div>
+                    <div className="font-semibold text-amber-200">Council recovered from an issue</div>
+                    <p className="mt-1 text-amber-100/80">{latestIssue.message}</p>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
-        </div>
-      </section>
+            )}
+          </div>
+        </section>
+      )}
 
       <div className="min-h-screen bg-[var(--bg-app)]">
         <CouncilTimeline />

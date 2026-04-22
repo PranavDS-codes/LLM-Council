@@ -4,6 +4,7 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import { getApiUrl } from '@/lib/api';
 
 import { cleanModelOverrides } from './configState';
+import { mergePersistedCouncilState } from './persistState';
 import { parseSseChunk } from './sse';
 import { applyCouncilEvent, createSession, deriveLoadPhase, stopSessionState } from './sessionState';
 import type { Agent, CouncilSession } from './types';
@@ -229,23 +230,7 @@ export const useCouncilStore = create<CouncilState>()(
         theme: state.theme,
         settings: state.settings,
       }),
-      merge: (persistedState, currentState) => {
-        const typedState = persistedState as Partial<CouncilState>;
-        return {
-          ...currentState,
-          ...typedState,
-          isStreaming: false,
-          abortController: null,
-          settings: {
-            ...currentState.settings,
-            ...(typedState.settings || {}),
-          },
-          sessions: (typedState.sessions || []).map((session) => ({
-            ...session,
-            activePhase: session.activePhase || deriveLoadPhase(session),
-          })),
-        };
-      },
+      merge: (persistedState, currentState) => mergePersistedCouncilState(persistedState, currentState),
     },
   ),
 );

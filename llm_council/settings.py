@@ -59,8 +59,8 @@ DEFAULT_MODEL_MAP: Final[dict[str, str]] = {
     "generator_2": "nvidia/nemotron-3-nano-30b-a3b:free",
     "generator_3": "z-ai/glm-4.5-air:free",
     "generator_4": "openai/gpt-oss-120b:free",
-    "generator_5": "nvidia/nemotron-3-super-120b-a12b:free",
-    "critic": "google/gemma-4-31b-it:free",
+    "generator_5": "google/gemma-4-31b-it:free",
+    "critic": "nvidia/nemotron-3-super-120b-a12b:free",
     "architect": "minimax/minimax-m2.5:free",
     "finalizer": "minimax/minimax-m2.5:free",
 }

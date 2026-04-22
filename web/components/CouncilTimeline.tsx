@@ -1,8 +1,10 @@
 'use client';
 
-import { AlertTriangle, CheckCircle2, Clock, Hash, Loader2, PauseCircle } from 'lucide-react';
+import { AlertTriangle, Brain, CheckCircle2, Clock, Gavel, Hash, Loader2, PauseCircle, Shield, User, Zap } from 'lucide-react';
 
+import { AGENT_ICONS, getPhaseStatusLabel, getSelectedAgents } from '@/lib/councilMeta';
 import { useCouncilStore } from '@/store/councilStore';
+import type { Agent } from '@/store/types';
 
 import { PhaseArchitect } from './PhaseArchitect';
 import { PhaseCritic } from './PhaseCritic';
@@ -13,6 +15,7 @@ export function CouncilTimeline() {
   const { isStreaming, currentSessionId, sessions } = useCouncilStore();
   const currentSession = sessions.find((session) => session.id === currentSessionId);
   const activePhase = currentSession?.activePhase || 0;
+  const selectedAgents = currentSession ? getSelectedAgents(currentSession.agents) : [];
 
   if (!currentSession) {
     return (
@@ -50,12 +53,12 @@ export function CouncilTimeline() {
             </p>
           </div>
           <div className="flex flex-wrap gap-3 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
-            <span className="rounded-full border border-[var(--border-base)] bg-[var(--bg-panel-secondary)] px-3 py-1.5">
-              {currentSession.agents.filter((agent) => agent.selected).length} active agents
+            <span className="rounded-full border border-cyan-500/25 bg-cyan-500/10 px-3 py-1.5 text-cyan-100">
+              status: {getPhaseStatusLabel(currentSession.activePhase, currentSession.status)}
             </span>
-            <span className="rounded-full border border-[var(--border-base)] bg-[var(--bg-panel-secondary)] px-3 py-1.5">
-              status: {currentSession.status}
-            </span>
+            {selectedAgents.map((agent) => (
+              <AgentBadge key={agent.id} agent={agent} />
+            ))}
           </div>
         </div>
       </section>
@@ -181,6 +184,24 @@ export function CouncilTimeline() {
         </div>
       )}
     </div>
+  );
+}
+
+function AgentBadge({ agent }: { agent: Agent }) {
+  const fallbackIcons = {
+    'The Academic': Brain,
+    'The Layman': User,
+    'The Skeptic': Shield,
+    'The Futurist': Zap,
+    'The Ethical Guardian': Gavel,
+  };
+  const Icon = AGENT_ICONS[agent.name] || fallbackIcons[agent.name as keyof typeof fallbackIcons] || User;
+
+  return (
+    <span className="inline-flex items-center gap-2 rounded-full border border-[var(--border-base)] bg-[var(--bg-panel-secondary)] px-3 py-1.5 normal-case tracking-normal text-[var(--text-main)]">
+      <Icon className="h-3.5 w-3.5 text-cyan-400" />
+      <span>{agent.name}</span>
+    </span>
   );
 }
 

@@ -8,7 +8,9 @@ import {
   ChevronLeft,
   ChevronRight,
   FileClock,
+  Globe,
   History,
+  Linkedin,
   MessageSquare,
   Moon,
   PauseCircle,
@@ -116,6 +118,51 @@ export function Sidebar() {
           <Settings className="h-4 w-4" />
           {!isCollapsed && <span>Config</span>}
         </a>
+
+        <div
+          className={`rounded-xl border border-[var(--border-base)] bg-[var(--bg-panel-secondary)]/80 p-3 transition-all ${
+            isCollapsed ? 'flex flex-col items-center gap-2' : 'space-y-3'
+          }`}
+        >
+          {!isCollapsed && (
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-[0.24em] text-cyan-500">
+                Built by Pranav
+              </div>
+              <p className="mt-1 text-xs text-[var(--text-muted)]">
+                Portfolio and LinkedIn
+              </p>
+            </div>
+          )}
+
+          <div className={`grid gap-2 ${isCollapsed ? 'w-full' : 'grid-cols-2'}`}>
+            <a
+              href="https://pranavds-codes.github.io/portfolio/"
+              target="_blank"
+              rel="noreferrer"
+              className={`inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/20 bg-cyan-500/10 text-cyan-100 transition-colors hover:bg-cyan-500/20 ${
+                isCollapsed ? 'h-9 w-9 self-center rounded-full p-0' : 'px-3 py-2 text-sm font-medium'
+              }`}
+              title="Portfolio"
+            >
+              <Globe className="h-4 w-4" />
+              {!isCollapsed && <span>Portfolio</span>}
+            </a>
+
+            <a
+              href="https://www.linkedin.com/in/pranav-pant-ds/"
+              target="_blank"
+              rel="noreferrer"
+              className={`inline-flex items-center justify-center gap-2 rounded-lg border border-sky-500/20 bg-sky-500/10 text-sky-100 transition-colors hover:bg-sky-500/20 ${
+                isCollapsed ? 'h-9 w-9 self-center rounded-full p-0' : 'px-3 py-2 text-sm font-medium'
+              }`}
+              title="LinkedIn"
+            >
+              <Linkedin className="h-4 w-4" />
+              {!isCollapsed && <span>LinkedIn</span>}
+            </a>
+          </div>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-2 py-2">

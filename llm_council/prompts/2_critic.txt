@@ -21,15 +21,6 @@ Score every candidate from 1-10 on all five metrics:
 You must output a **SINGLE VALID JSON OBJECT**.
 
 **Schema:**
-{{
-  "reviews": {{
-    "Agent-ID-1": {{
-      "metric_scores": {{"accuracy": 1, "relevance": 1, "completeness": 1, "clarity": 1, "practical_usefulness": 1}},
-      "critique": "Specific, constructive critique..."
-    }},
-    "Agent-ID-2": {{
-      "metric_scores": {{"accuracy": 1, "relevance": 1, "completeness": 1, "clarity": 1, "practical_usefulness": 1}},
-      "critique": "Specific, constructive critique..."
-    }}
-  }}
-}}
+{review_schema}
+
+The `reviews` keys above are mandatory and must match exactly. Do not replace them with placeholder IDs such as `Agent-ID-1`.

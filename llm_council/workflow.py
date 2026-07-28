@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Callable, Optional
+from typing import Any, AsyncIterator, Callable, Optional, Sequence
 
 from .llm_client import LLMClient
 from .prompts import PromptSet, load_prompt_set
@@ -71,10 +72,39 @@ def balanced_critic_batches(responses: list[dict[str, str]]) -> list[list[dict[s
     return batches
 
 
-def parse_critic_batch(raw: str, expected_agents: set[str]) -> dict[str, dict[str, Any]]:
+def critic_review_schema(agent_names: Sequence[str]) -> str:
+    return json.dumps(
+        {
+            "reviews": {
+                agent_name: {
+                    "metric_scores": {metric: 1 for metric in SCORE_METRICS},
+                    "critique": "Specific, constructive critique.",
+                }
+                for agent_name in agent_names
+            }
+        },
+        indent=2,
+    )
+
+
+def parse_critic_batch(raw: str, expected_agents: Sequence[str]) -> dict[str, dict[str, Any]]:
     payload = CriticBatchOutput.model_validate_json(raw)
+    expected_names = list(expected_agents)
+    expected_set = set(expected_names)
+    response_keys = set(payload.reviews)
+    placeholder_keys = sorted(
+        (key for key in payload.reviews if re.fullmatch(r"Agent-ID-(\d+)", key)),
+        key=lambda key: int(key.rsplit("-", 1)[1]),
+    )
+    if response_keys != expected_set and len(placeholder_keys) == len(expected_names) and len(payload.reviews) == len(expected_names):
+        # Older prompt versions used Agent-ID-N examples. Preserve valid output by mapping
+        # those numbered keys back to the ordered critic batch that produced them.
+        payload.reviews = {
+            agent_name: payload.reviews[placeholder_key]
+            for agent_name, placeholder_key in zip(expected_names, placeholder_keys, strict=True)
+        }
     reviews: dict[str, dict[str, Any]] = {}
-    for agent_name in expected_agents:
+    for agent_name in expected_names:
         review = payload.reviews.get(agent_name)
         if review is None or set(review.metric_scores) != set(SCORE_METRICS):
             raise ValueError(f"Critic omitted a complete scorecard for {agent_name}")
@@ -145,7 +175,7 @@ class CouncilWorkflow:
     @staticmethod
     def _reasoning_effort_for(role: str) -> str:
         return {
-            "critic": "high",
+            "critic": "medium",
             "architect": "medium",
             "finalizer": "low",
         }.get(role, "low")
@@ -381,7 +411,11 @@ class CouncilWorkflow:
 
         for batch_index, batch in enumerate(critic_batches, start=1):
             formatted_text = self._format_responses_for_critic(batch)
-            prompt = self.prompts.critic.format(query=request.query, formatted_responses=formatted_text)
+            prompt = self.prompts.critic.format(
+                query=request.query,
+                formatted_responses=formatted_text,
+                review_schema=critic_review_schema([response["persona"] for response in batch]),
+            )
             critic_trace = tracer.start_llm(
                 f"Critic Batch {batch_index}",
                 {"query": request.query, "prompt": prompt, "drafts": batch},
@@ -454,7 +488,7 @@ class CouncilWorkflow:
                     critic_usage[key] += usage.get(key, 0)
                 tracer.log_step("Critics", f"Critic-Batch-{batch_index}", prompt, critic_json)
                 try:
-                    collected_reviews.update(parse_critic_batch(critic_json, {item["persona"] for item in batch}))
+                    collected_reviews.update(parse_critic_batch(critic_json, [item["persona"] for item in batch]))
                 except (ValueError, TypeError) as exc:
                     trace_run.finish(outputs={"visible_output": critic_json}, usage=usage, error=exc)
                     yield {"type": "error", "message": f"Critic {batch_index} returned invalid scorecards: {exc}", "phase": "critic", "recoverable": True}

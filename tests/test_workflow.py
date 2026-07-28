@@ -8,7 +8,7 @@ from pathlib import Path
 
 from llm_council.prompts import load_prompt_set
 from llm_council.settings import get_settings
-from llm_council.workflow import CouncilWorkflow, WorkflowRequest, aggregate_critic_reviews, balanced_critic_batches, select_active_agents
+from llm_council.workflow import CouncilWorkflow, WorkflowRequest, aggregate_critic_reviews, balanced_critic_batches, critic_review_schema, parse_critic_batch, select_active_agents
 
 
 class FakeClient:
@@ -178,7 +178,7 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake_client.calls[0][1]["model"], "model/custom")
         self.assertNotIn("max_tokens", fake_client.calls[0][1])
         self.assertEqual(fake_client.calls[0][1]["reasoning_effort"], "low")
-        self.assertEqual(fake_client.calls[1][1]["reasoning_effort"], "high")
+        self.assertEqual(fake_client.calls[1][1]["reasoning_effort"], "medium")
         self.assertEqual(fake_client.calls[2][1]["reasoning_effort"], "medium")
         self.assertEqual(fake_client.calls[3][1]["reasoning_effort"], "low")
         self.assertIn("SCORECARD", fake_client.calls[2][0][0])
@@ -227,6 +227,24 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         }
         result = aggregate_critic_reviews(reviews, responses)
         self.assertEqual(result["finalists"], ["Agent 1", "Agent 0"])
+
+    async def test_critic_placeholder_ids_map_back_to_the_ordered_batch(self):
+        scorecard = {
+            "metric_scores": {"accuracy": 8, "relevance": 8, "completeness": 8, "clarity": 8, "practical_usefulness": 8},
+            "critique": "Solid response.",
+        }
+        reviews = parse_critic_batch(
+            json.dumps({"reviews": {"Agent-ID-1": scorecard, "Agent-ID-2": scorecard}}),
+            ["The Futurist", "The Ethical Guardian"],
+        )
+
+        self.assertEqual(list(reviews), ["The Futurist", "The Ethical Guardian"])
+
+    async def test_critic_schema_uses_the_real_agent_names(self):
+        schema = critic_review_schema(["The Futurist", "The Pragmatist"])
+        self.assertIn('"The Futurist"', schema)
+        self.assertIn('"The Pragmatist"', schema)
+        self.assertNotIn("Agent-ID", schema)
 
     async def test_critic_batches_start_in_parallel(self):
         class ParallelCriticClient(FakeClient):

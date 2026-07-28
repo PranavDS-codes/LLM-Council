@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from llm_council.prompts import load_prompt_set
@@ -37,6 +38,22 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         workflow = CouncilWorkflow(settings=get_settings())
         events = [event async for event in workflow.stream(WorkflowRequest(query="test", selected_agents=["Ghost"]))]  # noqa: E501
         self.assertEqual(events[0]["type"], "error")
+        self.assertEqual(events[-1]["type"], "done")
+
+    async def test_missing_nvidia_key_emits_a_setup_error_without_crashing_stream(self):
+        settings = replace(get_settings(), use_mock_mode=False, nvidia_api_key=None)
+        workflow = CouncilWorkflow(settings=settings)
+
+        events = [
+            event
+            async for event in workflow.stream(
+                WorkflowRequest(query="Test", selected_agents=["The Academic"])
+            )
+        ]
+
+        self.assertEqual(events[0]["type"], "error")
+        self.assertIn("NVIDIA_API_KEY is not configured", events[0]["message"])
+        self.assertFalse(events[0]["recoverable"])
         self.assertEqual(events[-1]["type"], "done")
 
     async def test_single_agent_path_auto_wins_critic_phase(self):

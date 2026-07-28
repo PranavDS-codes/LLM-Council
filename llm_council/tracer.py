@@ -35,15 +35,14 @@ class WorkflowTracer:
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
 
         # --- REDACTION LOGIC ---
-        # Mask OpenRouter API Keys (start with sk-or-v1-)
-        # Also generic safety for "custom_api_key" if it appears in JSON string
+        # Mask browser-provided API keys if they appear in trace payloads.
         def redact(text: str) -> str:
             if not text: return text
             import re
             # Specific JSON field redaction
             text = re.sub(r'("custom_api_key"\s*:\s*")[^"]*(")', r'\1[REDACTED]\2', text)
-            # General key heuristic (sk-or-v1-...)
-            text = re.sub(r'(sk-or-v1-[a-zA-Z0-9]{32,})', r'[REDACTED_Key]', text)
+            # NVIDIA API keys use the nvapi- prefix.
+            text = re.sub(r'(nvapi-[a-zA-Z0-9_-]{20,})', r'[REDACTED_Key]', text)
             return text
 
         safe_input = redact(input_data)

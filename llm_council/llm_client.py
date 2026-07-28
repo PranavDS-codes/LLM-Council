@@ -12,12 +12,12 @@ class LLMClient:
         self.settings = settings or get_settings()
         self.mock_mode = self.settings.use_mock_mode
         
-        # Use passed key, or fallback to env, or None
-        target_key = api_key if api_key else self.settings.openrouter_api_key
+        # Use a browser-provided NVIDIA key when available, otherwise use the server key.
+        target_key = api_key if api_key else self.settings.nvidia_api_key
         
         self.openai_client = AsyncOpenAI(
             api_key=target_key,
-            base_url=self.settings.openrouter_base_url
+            base_url=self.settings.nvidia_api_base_url,
         ) if not self.mock_mode else None
         
     async def generate(self, prompt: str, schema: Optional[Any] = None, model: Optional[str] = None):
@@ -56,17 +56,11 @@ class LLMClient:
             return f"Mock Response to: {prompt[:50]}...", usage
 
     async def _real_generate(self, prompt: str, schema: Optional[Any] = None, model: Optional[str] = None):
-        target_model = model if model else DEFAULT_MODEL_MAP.get("generator_1", "nvidia/nemotron-nano-12b-v2-vl:free")
+        target_model = model if model else DEFAULT_MODEL_MAP["generator_1"]
         
         kwargs = {
             "model": target_model,
             "messages": [{"role": "user", "content": prompt}],
-            "extra_headers": {
-                "HTTP-Referer": self.settings.openrouter_site_url,
-                "X-Title": self.settings.openrouter_app_name,
-            },
-            # Debug upstream body as requested/suggested
-            # "debug": {"echo_upstream_body": True} 
         }
         
         if schema:
@@ -77,7 +71,7 @@ class LLMClient:
         
         for attempt in range(max_retries + 1):
             try:
-                print(f"\n[DEBUG] Sending request to OpenRouter:")
+                print("\n[DEBUG] Sending request to NVIDIA NIM:")
                 print(f"Model: {kwargs.get('model')}")
                 
                 response = await self.openai_client.chat.completions.create(**kwargs)
@@ -105,7 +99,7 @@ class LLMClient:
                     continue
 
                 if attempt == max_retries:
-                    return f"Error calling OpenRouter after {max_retries} retries: {error_msg}", {"prompt":0, "completion":0, "total":0}
+                    return f"Error calling NVIDIA NIM after {max_retries} retries: {error_msg}", {"prompt":0, "completion":0, "total":0}
                 
                 # Check for retryable codes
                 # Note: 422 is usually permanent unless params change, so we only filtered it above.
@@ -116,13 +110,13 @@ class LLMClient:
                      continue
                 
                 # If not retryable or fixed
-                return f"Error calling OpenRouter: {error_msg}", {"prompt":0, "completion":0, "total":0}
+                return f"Error calling NVIDIA NIM: {error_msg}", {"prompt":0, "completion":0, "total":0}
 
             except Exception as e:
                 error_msg = str(e)
                 print(f"[ERROR] Generic API Call Failed: {error_msg}")
                 if attempt == max_retries:
-                    return f"Error calling OpenRouter after {max_retries} retries: {error_msg}", {"prompt":0, "completion":0, "total":0}
+                    return f"Error calling NVIDIA NIM after {max_retries} retries: {error_msg}", {"prompt":0, "completion":0, "total":0}
                 
                 # Loose check for string-based errors (legacy or other libraries)
                 if "429" in error_msg or "500" in error_msg or "503" in error_msg:
@@ -131,7 +125,7 @@ class LLMClient:
                     await asyncio.sleep(delay)
                     continue # Try again
                 
-                return f"Error calling OpenRouter: {error_msg}", {"prompt":0, "completion":0, "total":0}
+                return f"Error calling NVIDIA NIM: {error_msg}", {"prompt":0, "completion":0, "total":0}
 
     async def check_connection(self, model: str) -> bool:
         """
@@ -148,10 +142,6 @@ class LLMClient:
             "model": model,
             "messages": [{"role": "user", "content": "Hi"}],
             "max_tokens": 1,
-            "extra_headers": {
-                "HTTP-Referer": self.settings.openrouter_site_url,
-                "X-Title": self.settings.openrouter_app_name,
-            }
         }
         
         # This will raise openai.APIStatusError if auth or model is invalid

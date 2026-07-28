@@ -9,7 +9,7 @@ LLM Council is a multi-agent answer engine that runs a question through four sta
 
 The project is split into:
 
-- `llm_council/`: FastAPI backend, council workflow, OpenRouter client, prompts, and CLI
+- `llm_council/`: FastAPI backend, council workflow, NVIDIA NIM client, prompts, and CLI
 - `web/`: Next.js frontend with live session streaming, local history, config overrides, and metrics
 
 ## What Changed In This Upgrade
@@ -24,7 +24,7 @@ The project is split into:
 
 - Python `3.13+`
 - Node.js `25+` recommended for the built-in TypeScript test runner
-- An OpenRouter API key for live runs
+- An NVIDIA API key for live NIM runs
 
 ## Environment
 
@@ -32,7 +32,8 @@ Copy `.env.example` to `.env` at the repo root or `llm_council/.env`.
 
 Important variables:
 
-- `OPENROUTER_API_KEY`: required for live model calls
+- `NVIDIA_API_KEY`: required for live model calls
+- `NVIDIA_API_BASE_URL`: defaults to `https://integrate.api.nvidia.com/v1`
 - `USE_MOCK_MODE=true|false`: run fake responses instead of real API calls. Defaults to `false`.
 - `ENABLE_TRACE_LOGS=true|false`: write markdown traces to `llm_council/logs/`
 - `CORS_ALLOW_ORIGINS`: comma-separated allowed frontend origins
@@ -78,14 +79,13 @@ Render requirements for this app:
 
 - Bind on `0.0.0.0`
 - Use the platform `PORT`
-- Set `OPENROUTER_API_KEY`
+- Set `NVIDIA_API_KEY`
 - Set CORS so the Vercel frontend can call the API
 
 Suggested environment values:
 
-- `OPENROUTER_API_KEY`: your real OpenRouter key
-- `OPENROUTER_SITE_URL`: your Vercel production URL or custom frontend domain
-- `OPENROUTER_APP_NAME`: `LLM Council`
+- `NVIDIA_API_KEY`: your NVIDIA API Catalog key
+- `NVIDIA_API_BASE_URL`: `https://integrate.api.nvidia.com/v1`
 - `USE_MOCK_MODE`: `false`
 - `CORS_ALLOW_ORIGINS`: your production frontend URL, for example `https://your-app.vercel.app`
 - `CORS_ALLOW_ORIGIN_REGEX`: optional preview support, for example `^https://.*\.vercel\.app$`

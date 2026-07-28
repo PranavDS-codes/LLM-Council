@@ -13,12 +13,10 @@ services:
         value: false
       - key: ENABLE_TRACE_LOGS
         value: false
-      - key: OPENROUTER_API_KEY
+      - key: NVIDIA_API_KEY
         sync: false
-      - key: OPENROUTER_SITE_URL
-        sync: false
-      - key: OPENROUTER_APP_NAME
-        value: LLM Council
+      - key: NVIDIA_API_BASE_URL
+        value: https://integrate.api.nvidia.com/v1
       - key: CORS_ALLOW_ORIGINS
         sync: false
       - key: CORS_ALLOW_ORIGIN_REGEX

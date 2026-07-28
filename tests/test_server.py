@@ -21,7 +21,10 @@ class ServerTests(unittest.TestCase):
 
     def test_check_model_returns_success_when_connection_passes(self):
         with patch.object(server.LLMClient, "check_connection", new=AsyncMock(return_value=True)):
-            response = self.client.post("/api/check-model", json={"model_id": "demo/model"})
+            response = self.client.post(
+                "/api/check-model",
+                json={"model_id": "demo/model", "api_key": "nvapi-test-key"},
+            )
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["valid"])
 

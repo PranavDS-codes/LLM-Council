@@ -96,8 +96,23 @@ class CouncilWorkflow:
             yield {"type": "done", "total_execution_time": 0.0, "total_tokens": total_tokens}
             return
 
+        if (
+            self.client_factory is LLMClient
+            and not self.settings.use_mock_mode
+            and not (request.custom_api_key or self.settings.nvidia_api_key)
+        ):
+            yield {
+                "type": "error",
+                "message": "NVIDIA_API_KEY is not configured. Add an NVIDIA API key to .env or provide one in Config.",
+                "phase": "generator",
+                "recoverable": False,
+            }
+            tracer.finalize()
+            yield {"type": "done", "total_execution_time": time.perf_counter() - workflow_start, "total_tokens": total_tokens}
+            return
+
         client = self.client_factory(
-            api_key=request.custom_api_key or self.settings.openrouter_api_key,
+            api_key=request.custom_api_key or self.settings.nvidia_api_key,
             settings=self.settings,
         )
         tracer.log_step(
@@ -285,4 +300,3 @@ class CouncilWorkflow:
             if response["persona"] in winner_id:
                 return response["content"]
         return batch[0]["content"]
-

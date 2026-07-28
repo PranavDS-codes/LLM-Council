@@ -56,8 +56,8 @@ The backend is instrumented to capture high-resolution telemetry for every reque
 | :--- | :--- | :--- |
 | **Time to First Token (TTFT)** | Latency from request start to first byte received. | Measured via `time.perf_counter()` in `server.py` yield loops. |
 | **Total Latency** | End-to-end execution time per agent. | Aggregated in `MetricData` objects passed via SSE. |
-| **Token Usage** | Precise count of Prompt vs. Completion tokens. | Extracted directly from OpenRouter API `usage` headers. |
-| **Model Throughput** | Comparison of model generation speeds. | Logged alongside model IDs (e.g., `nvidia/nemotron` vs `deepseek-r1t`). |
+| **Token Usage** | Precise count of prompt and completion tokens. | Extracted from NVIDIA NIM API usage metadata. |
+| **Model Throughput** | Comparison of model generation speeds. | Logged alongside NVIDIA NIM model IDs. |
 
 ---
 
@@ -90,7 +90,7 @@ To run the core consensus engine directly:
 
 1.  **Environment Setup**:
     ```bash
-    # Ensure OPENROUTER_API_KEY is set in .env
+    # Ensure NVIDIA_API_KEY is set in .env
     pip install -r requirements.txt
     ```
 

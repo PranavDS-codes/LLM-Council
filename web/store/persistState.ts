@@ -28,6 +28,12 @@ function sanitizeStringRecord(value: unknown): Record<string, string> {
   );
 }
 
+function sanitizeNvidiaModelOverrides(value: unknown): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(sanitizeStringRecord(value)).filter(([, model]) => !model.endsWith(':free')),
+  );
+}
+
 function emptyUsage(): MetricUsage {
   return { total: 0, prompt: 0, completion: 0 };
 }
@@ -213,8 +219,9 @@ export function mergePersistedCouncilState<T extends MergeableCouncilState>(
         ? raw.currentSessionId
         : currentState.currentSessionId,
     settings: {
-      apiKey: typeof rawSettings.apiKey === 'string' ? rawSettings.apiKey : currentState.settings.apiKey,
-      modelOverrides: sanitizeStringRecord(rawSettings.modelOverrides),
+      // Keys saved before the NIM migration cannot authenticate with NVIDIA.
+      apiKey: '',
+      modelOverrides: sanitizeNvidiaModelOverrides(rawSettings.modelOverrides),
     },
     sessions: hydratedSessions,
   };

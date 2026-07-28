@@ -8,9 +8,9 @@ async def test_connection():
     print("--- API Connection Test for All Agents ---")
     
     # Check Environment
-    api_key = os.getenv("OPENROUTER_API_KEY")
+    api_key = os.getenv("NVIDIA_API_KEY")
     if not api_key:
-        print("[ERROR] OPENROUTER_API_KEY not found in environment variables.")
+        print("[ERROR] NVIDIA_API_KEY not found in environment variables.")
         return
     else:
         print(f"[INFO] API Key found: {api_key[:5]}...{api_key[-4:]}")

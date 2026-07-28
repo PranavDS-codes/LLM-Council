@@ -65,8 +65,34 @@ test('mergePersistedCouncilState derives a safe active phase for legacy sessions
 
   assert.equal(merged.theme, 'light');
   assert.equal(merged.currentSessionId, 'session-1');
-  assert.equal(merged.settings.apiKey, 'demo-key');
+  assert.equal(merged.settings.apiKey, '');
   assert.deepEqual(merged.settings.modelOverrides, { critic: 'critic/model' });
   assert.equal(merged.sessions[0]?.activePhase, 4);
   assert.equal(merged.sessions[0]?.status, 'completed');
+});
+
+test('mergePersistedCouncilState clears legacy provider settings but retains saved sessions', () => {
+  const merged = mergePersistedCouncilState(
+    {
+      settings: {
+        apiKey: 'sk-or-v1-legacy-key',
+        modelOverrides: {
+          generator_1: 'nvidia/nemotron-nano-12b-v2-vl:free',
+          critic: 'openai/gpt-oss-120b',
+        },
+      },
+      sessions: [
+        {
+          id: 'session-1',
+          query: 'Retain this history',
+          agents: [],
+        },
+      ],
+    },
+    currentState,
+  );
+
+  assert.equal(merged.settings.apiKey, '');
+  assert.deepEqual(merged.settings.modelOverrides, { critic: 'openai/gpt-oss-120b' });
+  assert.equal(merged.sessions[0]?.query, 'Retain this history');
 });

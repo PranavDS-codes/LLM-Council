@@ -30,6 +30,10 @@ class FakeClient:
         yield type("Update", (), {"delta": content[midpoint:], "usage": None})()
         yield type("Update", (), {"delta": "", "usage": usage})()
 
+    async def stream_generate_race(self, prompt, *args, models, **kwargs):
+        async for update in self.stream_generate(prompt, *args, model=models[0], **kwargs):
+            yield update
+
 
 class WorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def test_select_active_agents_filters_invalid_personas(self):
@@ -133,6 +137,46 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake_client.calls[3][1]["reasoning_effort"], "low")
         self.assertIn("SCORECARD", fake_client.calls[2][0][0])
         self.assertIn("SCORECARD", fake_client.calls[3][0][0])
+
+    async def test_configured_phase_models_bypass_the_race_and_use_a_30_second_timeout(self):
+        class RecordingClient(FakeClient):
+            def __init__(self, responses):
+                super().__init__(responses)
+                self.calls = []
+                self.race_calls = 0
+
+            async def stream_generate(self, *args, **kwargs):
+                self.calls.append((args, kwargs))
+                async for update in super().stream_generate(*args, **kwargs):
+                    yield update
+
+            async def stream_generate_race(self, *args, **kwargs):
+                self.race_calls += 1
+                async for update in super().stream_generate_race(*args, **kwargs):
+                    yield update
+
+        client = RecordingClient([
+            ("Draft", {"prompt": 1, "completion": 1, "total": 2}),
+            (json.dumps({"reviews": {"The Academic": {"metric_scores": {"accuracy": 9, "relevance": 9, "completeness": 9, "clarity": 9, "practical_usefulness": 9}, "critique": "Strong."}}}), {"prompt": 1, "completion": 1, "total": 2}),
+            (json.dumps({"structure": ["Intro"], "tone_guidelines": "Clear", "missing_facts_to_add": [], "critique_integration": "Use it."}), {"prompt": 1, "completion": 1, "total": 2}),
+            ("Final", {"prompt": 1, "completion": 1, "total": 2}),
+        ])
+        workflow = CouncilWorkflow(settings=get_settings(), client_factory=lambda **kwargs: client)
+        overrides = {
+            "critic": "nvidia/custom-critic",
+            "architect": "nvidia/custom-architect",
+            "finalizer": "nvidia/custom-finalizer",
+        }
+
+        events = [event async for event in workflow.stream(WorkflowRequest(
+            query="Test", selected_agents=["The Academic"], custom_model_map=overrides,
+        ))]
+
+        self.assertEqual(client.race_calls, 0)
+        phase_calls = client.calls[1:]
+        self.assertEqual([call[1]["model"] for call in phase_calls], list(overrides.values()))
+        self.assertTrue(all(call[1]["first_response_timeout_seconds"] == 30 for call in phase_calls))
+        self.assertTrue(any(event["type"] == "finalizer_done" for event in events))
 
     async def test_critic_batches_balance_and_rank_finalists_deterministically(self):
         responses = [{"persona": f"Agent {index}", "content": "draft"} for index in range(5)]

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import types
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from llm_council.llm_client import LLMClient
+from llm_council.llm_client import LLMClient, StreamUpdate
 from llm_council.settings import DEFAULT_MODEL_MAP, get_settings
 
 
@@ -107,6 +108,29 @@ class NvidiaNimTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("".join(update.delta for update in updates), "Grounded answer.")
         self.assertEqual(request.await_args.kwargs["reasoning_effort"], "medium")
         self.assertNotIn("max_tokens", request.await_args.kwargs)
+
+    async def test_model_race_keeps_the_first_answer_stream_and_cancels_the_loser(self):
+        client = LLMClient(api_key="nvapi-test-key", settings=get_settings())
+        cancelled_models: list[str] = []
+
+        async def fake_stream_generate(_prompt, *, model, **_kwargs):
+            try:
+                if model.endswith("120b"):
+                    await asyncio.sleep(0.05)
+                    yield StreamUpdate(delta="slow", model=model)
+                else:
+                    await asyncio.sleep(0)
+                    yield StreamUpdate(delta="fast", model=model)
+                    yield StreamUpdate(usage={"prompt": 1, "completion": 1, "total": 2}, model=model)
+            except asyncio.CancelledError:
+                cancelled_models.append(model)
+                raise
+
+        client.stream_generate = fake_stream_generate  # type: ignore[method-assign]
+        updates = [update async for update in client.stream_generate_race("Test")]
+
+        self.assertEqual("".join(update.delta for update in updates), "fast")
+        self.assertTrue(any(model.endswith("120b") for model in cancelled_models))
 
 
 if __name__ == "__main__":

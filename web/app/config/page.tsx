@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { startTransition, useEffect, useState } from 'react';
 import { AlertTriangle, Check, Cpu, Key, Loader2, RefreshCcw, Save, Shield } from 'lucide-react';
 
 import { getApiUrl } from '@/lib/api';
@@ -28,8 +28,10 @@ export default function ConfigPage() {
   const [feedback, setFeedback] = useState<{ tone: FeedbackTone; message: string } | null>(null);
 
   useEffect(() => {
-    setDraftApiKey(settings.apiKey || '');
-    setDraftModelMap(settings.modelOverrides || {});
+    startTransition(() => {
+      setDraftApiKey(settings.apiKey || '');
+      setDraftModelMap(settings.modelOverrides || {});
+    });
   }, [settings.apiKey, settings.modelOverrides]);
 
   useEffect(() => {
@@ -240,7 +242,7 @@ export default function ConfigPage() {
               <Key className="h-5 w-5" />
             </div>
             <div className="flex-1">
-              <h2 className="mb-2 text-xl font-semibold">OpenRouter API Access</h2>
+              <h2 className="mb-2 text-xl font-semibold">NVIDIA NIM API Access</h2>
               <p className="mb-4 text-sm text-[var(--text-muted)]">
                 Your custom API key is stored locally in this browser. Leaving it empty uses the server default.
               </p>
@@ -250,7 +252,7 @@ export default function ConfigPage() {
                     type="password"
                     value={draftApiKey}
                     onChange={(event) => handleApiKeyChange(event.target.value)}
-                    placeholder="sk-or-v1-..."
+                    placeholder="nvapi-..."
                     className={`w-full rounded-lg border bg-[var(--bg-panel-secondary)] px-4 py-3 font-mono text-sm transition-all focus:outline-none focus:ring-2 ${
                       apiKeyStatus.status === 'invalid'
                         ? 'border-red-500 focus:ring-red-500/50'
@@ -299,9 +301,9 @@ export default function ConfigPage() {
                 <RefreshCcw className="h-5 w-5" />
               </div>
               <div>
-                <h2 className="mb-2 text-xl font-semibold">Agent Model Alignment</h2>
+                <h2 className="mb-2 text-xl font-semibold">Council Phase Models</h2>
                 <p className="text-sm text-[var(--text-muted)]">
-                  Assign specific models to council members and synthesis phases.
+                  Assign models to the critic, blueprint architect, and final synthesis. Generator models are managed in Agents.
                 </p>
               </div>
             </div>
@@ -316,19 +318,6 @@ export default function ConfigPage() {
           </div>
 
           <div className="relative z-10 grid gap-4 md:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-            {defaults?.personas.map((agent, index) => (
-              <ModelInput
-                key={agent}
-                label={agent}
-                value={draftModelMap[agent] || ''}
-                defaultValue={
-                  defaults.model_map[`generator_${index + 1}`] || defaults.model_map.generator_1 || ''
-                }
-                status={modelStatuses[agent]}
-                onChange={(value) => handleModelChange(agent, value)}
-              />
-            ))}
-
             <ModelInput
               label="Critic"
               value={draftModelMap.critic || ''}
@@ -357,7 +346,7 @@ export default function ConfigPage() {
           <AlertTriangle className="h-8 w-8 flex-shrink-0" />
           <div className="space-y-2">
             <p className="text-lg font-medium leading-relaxed">
-              Verification makes live API calls to OpenRouter. Custom API keys are saved in browser storage and are best suited for local or single-user deployments.
+              Verification makes live API calls to NVIDIA NIM. Custom API keys are saved in browser storage and are best suited for local or single-user deployments.
             </p>
             <p className="text-sm opacity-80">
               Server defaults: mock mode is <strong>{defaults?.mock_mode ? 'enabled' : 'disabled'}</strong>; trace logging is <strong>{defaults?.trace_logs_enabled ? 'enabled' : 'disabled'}</strong>.

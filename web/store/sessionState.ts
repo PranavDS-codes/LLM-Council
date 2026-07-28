@@ -11,6 +11,8 @@ import type {
   GeneratorDoneEvent,
   MetricData,
   MetricUsage,
+  FollowUpChatEvent,
+  FollowUpMessage,
 } from './types';
 
 export function emptyUsage(): MetricUsage {
@@ -28,9 +30,18 @@ export function createSession(id: string, query: string, agents: Agent[]): Counc
     status: 'streaming',
     generatorStreams: {},
     agentModels: {},
+    criticStream: '',
+    criticProgress: null,
     criticData: null,
+    architectStream: '',
+    architectModel: null,
     architectData: null,
+    finalizerModel: null,
     finalizerText: '',
+    followUpChat: {
+      selectedModel: 'openai/gpt-oss-20b',
+      messages: [],
+    },
     issues: [],
     metrics: {
       generators: {},
@@ -38,6 +49,38 @@ export function createSession(id: string, query: string, agents: Agent[]): Counc
       totalTokens: emptyUsage(),
     },
   };
+}
+
+function updateActiveFollowUpMessage(
+  session: CouncilSession,
+  updater: (message: FollowUpMessage) => FollowUpMessage,
+): CouncilSession {
+  const index = session.followUpChat.messages.findLastIndex(
+    (message) => message.role === 'assistant' && message.status === 'streaming',
+  );
+  if (index < 0) return session;
+  const messages = [...session.followUpChat.messages];
+  messages[index] = updater(messages[index]);
+  return { ...session, followUpChat: { ...session.followUpChat, messages } };
+}
+
+export function applyFollowUpChatEvent(session: CouncilSession, event: FollowUpChatEvent): CouncilSession {
+  switch (event.type) {
+    case 'chat_start':
+      return updateActiveFollowUpMessage(session, (message) => ({ ...message, model: event.model }));
+    case 'chat_reasoning_chunk':
+      return updateActiveFollowUpMessage(session, (message) => ({ ...message, reasoning: `${message.reasoning}${event.chunk}` }));
+    case 'chat_content_chunk':
+      return updateActiveFollowUpMessage(session, (message) => ({ ...message, content: `${message.content}${event.chunk}` }));
+    case 'chat_done':
+      return updateActiveFollowUpMessage(session, (message) => ({ ...message, model: event.model, status: 'completed', usage: event.usage }));
+    case 'chat_error':
+      return updateActiveFollowUpMessage(session, (message) => ({ ...message, status: 'error', error: event.message }));
+  }
+}
+
+export function stopFollowUpChatState(session: CouncilSession): CouncilSession {
+  return updateActiveFollowUpMessage(session, (message) => ({ ...message, status: 'stopped' }));
 }
 
 export function deriveLoadPhase(session: Pick<CouncilSession, 'finalizerText' | 'architectData' | 'criticData'>): 1 | 2 | 3 | 4 {
@@ -80,6 +123,8 @@ function mergeCriticData(previous: CriticData | null, incoming: CriticResultEven
     ...incoming,
     scores: { ...(previous?.scores || {}), ...(incoming.scores || {}) },
     flaws: { ...(previous?.flaws || {}), ...(incoming.flaws || {}) },
+    scorecards: { ...(previous?.scorecards || {}), ...(incoming.scorecards || {}) },
+    finalists: incoming.finalists || previous?.finalists || [],
     reasoning: [previousReasoning, nextReasoning].filter(Boolean).join('\n\n---\n\n'),
     rankings: incoming.rankings || previous?.rankings || [],
     winner_id: [previous?.winner_id, incoming.winner_id].filter(Boolean).join(' & '),
@@ -208,6 +253,24 @@ export function applyCouncilEvent(session: CouncilSession, event: CouncilEvent):
       return withMetric;
     }
 
+    case 'critic_start': {
+      const nextSession: CouncilSession = {
+        ...session,
+        activePhase: Math.max(session.activePhase, 2) as CouncilSession['activePhase'],
+        status: 'streaming',
+        criticStream: '',
+        criticProgress: { batch: event.batch, totalBatches: event.total_batches, model: event.model },
+      };
+      nextSession.summary = getSessionSummary(nextSession);
+      return nextSession;
+    }
+
+    case 'critic_chunk':
+      return { ...session, criticStream: `${session.criticStream}${event.chunk}` };
+
+    case 'critic_done':
+      return { ...session, criticProgress: null };
+
     case 'architect_result': {
       const withMetric = updatePhaseMetric(
         {
@@ -221,6 +284,32 @@ export function applyCouncilEvent(session: CouncilSession, event: CouncilEvent):
       );
       withMetric.summary = getSessionSummary(withMetric);
       return withMetric;
+    }
+
+    case 'architect_start': {
+      const nextSession: CouncilSession = {
+        ...session,
+        activePhase: Math.max(session.activePhase, 3) as CouncilSession['activePhase'],
+        status: 'streaming',
+        architectStream: '',
+        architectModel: event.model,
+      };
+      nextSession.summary = getSessionSummary(nextSession);
+      return nextSession;
+    }
+
+    case 'architect_chunk':
+      return { ...session, architectStream: `${session.architectStream}${event.chunk}` };
+
+    case 'finalizer_start': {
+      const nextSession: CouncilSession = {
+        ...session,
+        activePhase: 4,
+        status: 'streaming',
+        finalizerModel: event.model,
+      };
+      nextSession.summary = getSessionSummary(nextSession);
+      return nextSession;
     }
 
     case 'finalizer_chunk': {

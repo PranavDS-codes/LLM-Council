@@ -13,6 +13,8 @@ const currentState = {
     apiKey: '',
     modelOverrides: {},
   },
+  agentRegistry: [],
+  agentDraft: [],
   sessions: [],
   currentSessionId: null,
 };
@@ -65,8 +67,60 @@ test('mergePersistedCouncilState derives a safe active phase for legacy sessions
 
   assert.equal(merged.theme, 'light');
   assert.equal(merged.currentSessionId, 'session-1');
-  assert.equal(merged.settings.apiKey, 'demo-key');
+  assert.equal(merged.settings.apiKey, '');
   assert.deepEqual(merged.settings.modelOverrides, { critic: 'critic/model' });
   assert.equal(merged.sessions[0]?.activePhase, 4);
   assert.equal(merged.sessions[0]?.status, 'completed');
+});
+
+test('mergePersistedCouncilState clears legacy provider settings but retains saved sessions', () => {
+  const merged = mergePersistedCouncilState(
+    {
+      settings: {
+        apiKey: 'sk-or-v1-legacy-key',
+        modelOverrides: {
+          generator_1: 'nvidia/nemotron-nano-12b-v2-vl:free',
+          critic: 'openai/gpt-oss-120b',
+        },
+      },
+      sessions: [
+        {
+          id: 'session-1',
+          query: 'Retain this history',
+          agents: [],
+        },
+      ],
+    },
+    currentState,
+  );
+
+  assert.equal(merged.settings.apiKey, '');
+  assert.deepEqual(merged.settings.modelOverrides, { critic: 'openai/gpt-oss-120b' });
+  assert.equal(merged.sessions[0]?.query, 'Retain this history');
+  assert.equal(merged.agentRegistry[0]?.model, 'openai/gpt-oss-20b');
+  assert.equal(merged.agentRegistry.length, 5);
+});
+
+test('legacy generator models migrate into the browser-local agent registry', () => {
+  const merged = mergePersistedCouncilState({ settings: { modelOverrides: { generator_1: 'custom/model', critic: 'phase/model' } } }, currentState);
+  assert.equal(merged.agentRegistry[0]?.model, 'custom/model');
+  assert.deepEqual(merged.settings.modelOverrides, { critic: 'phase/model' });
+  assert.equal(merged.agents.length, merged.agentRegistry.length);
+});
+
+test('agent drafts survive hydration without replacing the applied registry', () => {
+  const merged = mergePersistedCouncilState({
+    agentRegistry: [{ id: 'saved', name: 'Saved', personaInstruction: 'Saved prompt', model: 'model/saved' }],
+    agentDraft: [{ id: 'draft', name: 'Draft', personaInstruction: 'Draft prompt', model: 'model/draft' }],
+  }, currentState);
+  assert.equal(merged.agentRegistry[0]?.name, 'Saved');
+  assert.equal(merged.agentDraft[0]?.name, 'Draft');
+});
+
+test('legacy sessions receive an empty persisted follow-up chat', () => {
+  const merged = mergePersistedCouncilState({
+    sessions: [{ id: 'legacy-chat', query: 'Keep history', finalizerText: 'Final report' }],
+  }, currentState);
+  assert.equal(merged.sessions[0]?.followUpChat.selectedModel, 'openai/gpt-oss-20b');
+  assert.deepEqual(merged.sessions[0]?.followUpChat.messages, []);
 });

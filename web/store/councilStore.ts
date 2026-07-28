@@ -2,26 +2,26 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { getApiUrl } from '@/lib/api';
+import { DEFAULT_AGENT_REGISTRY } from '@/lib/defaultAgents';
 
 import { cleanModelOverrides } from './configState';
 import { mergePersistedCouncilState } from './persistState';
-import { parseSseChunk } from './sse';
-import { applyCouncilEvent, createSession, deriveLoadPhase, stopSessionState } from './sessionState';
-import type { Agent, CouncilSession } from './types';
+import { parseFollowUpSseChunk, parseSseChunk } from './sse';
+import { applyCouncilEvent, applyFollowUpChatEvent, createSession, deriveLoadPhase, stopFollowUpChatState, stopSessionState } from './sessionState';
+import type { Agent, AgentRegistryEntry, CouncilSession, FollowUpModel } from './types';
 
-const INITIAL_AGENTS: Agent[] = [
-  { id: 'The Academic', name: 'The Academic', selected: true },
-  { id: 'The Layman', name: 'The Layman', selected: true },
-  { id: 'The Skeptic', name: 'The Skeptic', selected: true },
-  { id: 'The Futurist', name: 'The Futurist', selected: true },
-  { id: 'The Ethical Guardian', name: 'The Ethical Guardian', selected: true },
-];
+const selectAllAgents = (registry: AgentRegistryEntry[]): Agent[] => registry.map(({ id, name }) => ({ id, name, selected: true }));
 
 export interface CouncilState {
   query: string;
   agents: Agent[];
+  agentRegistry: AgentRegistryEntry[];
+  agentDraft: AgentRegistryEntry[];
   isStreaming: boolean;
   abortController: AbortController | null;
+  isFollowUpStreaming: boolean;
+  followUpAbortController: AbortController | null;
+  followUpSessionId: string | null;
   theme: 'dark' | 'light';
   settings: {
     apiKey: string;
@@ -35,10 +35,16 @@ export interface CouncilState {
   resetAll: () => void;
   toggleTheme: () => void;
   setSettings: (settings: Partial<CouncilState['settings']>) => void;
+  setAgentRegistry: (registry: AgentRegistryEntry[]) => void;
+  setAgentDraft: (registry: AgentRegistryEntry[]) => void;
+  resetAgentRegistry: () => void;
   startSession: () => Promise<void>;
   stopSession: () => void;
   loadSession: (sessionId: string) => void;
   deleteSession: (id: string) => void;
+  setFollowUpModel: (model: FollowUpModel) => void;
+  sendFollowUpMessage: (message: string) => Promise<void>;
+  stopFollowUpMessage: () => void;
 }
 
 function updateSession(
@@ -53,9 +59,14 @@ export const useCouncilStore = create<CouncilState>()(
   persist(
     (set, get) => ({
       query: '',
-      agents: INITIAL_AGENTS,
+      agents: selectAllAgents(DEFAULT_AGENT_REGISTRY),
+      agentRegistry: DEFAULT_AGENT_REGISTRY,
+      agentDraft: DEFAULT_AGENT_REGISTRY,
       isStreaming: false,
       abortController: null,
+      isFollowUpStreaming: false,
+      followUpAbortController: null,
+      followUpSessionId: null,
       theme: 'dark',
       settings: {
         apiKey: '',
@@ -76,13 +87,7 @@ export const useCouncilStore = create<CouncilState>()(
           agents: state.agents.map((agent) => ({ ...agent, selected })),
         })),
       resetAll: () =>
-        set({
-          query: '',
-          agents: INITIAL_AGENTS,
-          currentSessionId: null,
-          isStreaming: false,
-          abortController: null,
-        }),
+        set((state) => ({ query: '', agents: selectAllAgents(state.agentRegistry), currentSessionId: null, isStreaming: false, abortController: null })),
       toggleTheme: () =>
         set((state) => ({
           theme: state.theme === 'dark' ? 'light' : 'dark',
@@ -97,6 +102,21 @@ export const useCouncilStore = create<CouncilState>()(
               : state.settings.modelOverrides,
           },
         })),
+      setAgentRegistry: (agentRegistry) => set((state) => ({
+        agentRegistry,
+        agentDraft: agentRegistry,
+        agents: agentRegistry.map((entry) => ({
+          id: entry.id,
+          name: entry.name,
+          selected: state.agents.find((agent) => agent.id === entry.id)?.selected ?? true,
+        })),
+      })),
+      setAgentDraft: (agentDraft) => set({ agentDraft }),
+      resetAgentRegistry: () => set({
+        agentRegistry: DEFAULT_AGENT_REGISTRY,
+        agentDraft: DEFAULT_AGENT_REGISTRY,
+        agents: selectAllAgents(DEFAULT_AGENT_REGISTRY),
+      }),
       deleteSession: (id) =>
         set((state) => ({
           sessions: state.sessions.filter((session) => session.id !== id),
@@ -111,7 +131,11 @@ export const useCouncilStore = create<CouncilState>()(
         set({
           currentSessionId: sessionId,
           query: session.query,
-          agents: session.agents,
+          agents: get().agentRegistry.map((entry) => ({
+            id: entry.id,
+            name: entry.name,
+            selected: session.agents.find((agent) => agent.id === entry.id)?.selected ?? false,
+          })),
           sessions: updateSession(get().sessions, sessionId, (currentSession) => ({
             ...currentSession,
             activePhase: currentSession.activePhase || deriveLoadPhase(currentSession),
@@ -130,6 +154,97 @@ export const useCouncilStore = create<CouncilState>()(
           abortController: null,
           sessions: updateSession(state.sessions, currentSessionId, stopSessionState),
         }));
+      },
+      setFollowUpModel: (model) => {
+        const sessionId = get().currentSessionId;
+        if (!sessionId) return;
+        set((state) => ({
+          sessions: updateSession(state.sessions, sessionId, (session) => ({
+            ...session,
+            followUpChat: { ...session.followUpChat, selectedModel: model },
+          })),
+        }));
+      },
+      stopFollowUpMessage: () => {
+        const { followUpAbortController, isFollowUpStreaming, followUpSessionId } = get();
+        if (!isFollowUpStreaming || !followUpAbortController || !followUpSessionId) return;
+        followUpAbortController.abort();
+        set((state) => ({
+          isFollowUpStreaming: false,
+          followUpAbortController: null,
+          followUpSessionId: null,
+          sessions: updateSession(state.sessions, followUpSessionId, stopFollowUpChatState),
+        }));
+      },
+      sendFollowUpMessage: async (message) => {
+        const state = get();
+        const sessionId = state.currentSessionId;
+        const session = state.sessions.find((candidate) => candidate.id === sessionId);
+        const content = message.trim();
+        if (!sessionId || !session || state.isFollowUpStreaming || session.status !== 'completed' || !session.finalizerText.trim() || !content) return;
+
+        const controller = new AbortController();
+        const userMessage = { id: crypto.randomUUID(), role: 'user' as const, content, reasoning: '', timestamp: Date.now() };
+        const assistantMessage = {
+          id: crypto.randomUUID(), role: 'assistant' as const, content: '', reasoning: '', timestamp: Date.now(),
+          model: session.followUpChat.selectedModel, status: 'streaming' as const,
+        };
+        const history: { role: 'user' | 'assistant'; content: string }[] = [];
+        let pendingUser: { role: 'user'; content: string } | null = null;
+        for (const entry of session.followUpChat.messages) {
+          if (entry.role === 'user') {
+            pendingUser = entry.content.trim() ? { role: 'user', content: entry.content } : null;
+          } else if (pendingUser && entry.content.trim()) {
+            history.push(pendingUser, { role: 'assistant', content: entry.content });
+            pendingUser = null;
+          }
+        }
+        history.push({ role: 'user', content: userMessage.content });
+
+        set((currentState) => ({
+          isFollowUpStreaming: true,
+          followUpAbortController: controller,
+          followUpSessionId: sessionId,
+          sessions: updateSession(currentState.sessions, sessionId, (currentSession) => ({
+            ...currentSession,
+            followUpChat: { ...currentSession.followUpChat, messages: [...currentSession.followUpChat.messages, userMessage, assistantMessage] },
+          })),
+        }));
+
+        try {
+          const response = await fetch(getApiUrl('/api/follow-up-chat'), {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ final_report: session.finalizerText, messages: history, model: session.followUpChat.selectedModel, custom_api_key: state.settings.apiKey || undefined }),
+            signal: controller.signal,
+          });
+          if (!response.ok) throw new Error(`Request failed with status ${response.status}`);
+          if (!response.body) throw new Error('No response body was returned by the backend.');
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          while (true) {
+            const { done, value } = await reader.read();
+            const parsed = parseFollowUpSseChunk(buffer, done ? '\n\n' : decoder.decode(value, { stream: true }));
+            buffer = parsed.buffer;
+            if (parsed.events.length) {
+              set((currentState) => ({
+                sessions: updateSession(currentState.sessions, sessionId, (currentSession) => parsed.events.reduce(applyFollowUpChatEvent, currentSession)),
+              }));
+            }
+            if (done) break;
+          }
+        } catch (error) {
+          if ((error as Error).name !== 'AbortError') {
+            set((currentState) => ({
+              sessions: updateSession(currentState.sessions, sessionId, (currentSession) => applyFollowUpChatEvent(currentSession, {
+                type: 'chat_error', message: (error as Error).message || 'The follow-up stream ended unexpectedly.', recoverable: true,
+              })),
+            }));
+          }
+        } finally {
+          if (get().followUpAbortController === controller) set({ isFollowUpStreaming: false, followUpAbortController: null, followUpSessionId: null });
+        }
       },
       startSession: async () => {
         const state = get();
@@ -160,6 +275,12 @@ export const useCouncilStore = create<CouncilState>()(
               custom_model_map: Object.keys(state.settings.modelOverrides).length > 0
                 ? state.settings.modelOverrides
                 : undefined,
+              agents: state.agentRegistry.map((agent) => ({
+                id: agent.id,
+                name: agent.name,
+                persona_instruction: agent.personaInstruction,
+                model: agent.model,
+              })),
             }),
             signal: controller.signal,
           });
@@ -229,6 +350,8 @@ export const useCouncilStore = create<CouncilState>()(
         currentSessionId: state.currentSessionId,
         theme: state.theme,
         settings: state.settings,
+        agentRegistry: state.agentRegistry,
+        agentDraft: state.agentDraft,
       }),
       merge: (persistedState, currentState) => mergePersistedCouncilState(persistedState, currentState),
     },

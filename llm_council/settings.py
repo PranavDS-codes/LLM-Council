@@ -55,24 +55,22 @@ PERSONA: Final[dict[str, dict[str, str]]] = {
 }
 
 DEFAULT_MODEL_MAP: Final[dict[str, str]] = {
-    "generator_1": "nvidia/nemotron-nano-12b-v2-vl:free",
-    "generator_2": "nvidia/nemotron-3-nano-30b-a3b:free",
-    "generator_3": "z-ai/glm-4.5-air:free",
-    "generator_4": "nvidia/nemotron-nano-12b-v2-vl:free",
-    "generator_5": "nvidia/nemotron-3-nano-30b-a3b:free",
-    "critic": "nvidia/nemotron-3-super-120b-a12b:free",
-    "architect": "openai/gpt-oss-120b:free",
-    "finalizer": "nvidia/nemotron-3-super-120b-a12b:free",
+    "generator_1": "openai/gpt-oss-20b",
+    "generator_2": "openai/gpt-oss-20b",
+    "generator_3": "openai/gpt-oss-20b",
+    "generator_4": "openai/gpt-oss-20b",
+    "generator_5": "openai/gpt-oss-20b",
+    "critic": "openai/gpt-oss-120b",
+    "architect": "openai/gpt-oss-120b",
+    "finalizer": "openai/gpt-oss-120b",
 }
 
 
 @dataclass(frozen=True)
 class Settings:
     use_mock_mode: bool
-    openrouter_api_key: str | None
-    openrouter_base_url: str
-    openrouter_site_url: str
-    openrouter_app_name: str
+    nvidia_api_key: str | None
+    nvidia_api_base_url: str
     cors_allow_origins: tuple[str, ...]
     cors_allow_origin_regex: str | None
     enable_trace_logs: bool
@@ -84,10 +82,8 @@ class Settings:
 def get_settings() -> Settings:
     return Settings(
         use_mock_mode=_env_flag("USE_MOCK_MODE", False),
-        openrouter_api_key=os.getenv("OPENROUTER_API_KEY"),
-        openrouter_base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
-        openrouter_site_url=os.getenv("OPENROUTER_SITE_URL", "https://llm-council.local"),
-        openrouter_app_name=os.getenv("OPENROUTER_APP_NAME", "LLM Council"),
+        nvidia_api_key=_env_optional("NVIDIA_API_KEY"),
+        nvidia_api_base_url=os.getenv("NVIDIA_API_BASE_URL", "https://integrate.api.nvidia.com/v1"),
         cors_allow_origins=_env_csv(
             "CORS_ALLOW_ORIGINS",
             ("http://localhost:3000", "http://127.0.0.1:3000"),

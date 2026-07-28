@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
 from llm_council import server
+from llm_council.llm_client import StreamUpdate
 
 
 class ServerTests(unittest.TestCase):
@@ -21,7 +22,10 @@ class ServerTests(unittest.TestCase):
 
     def test_check_model_returns_success_when_connection_passes(self):
         with patch.object(server.LLMClient, "check_connection", new=AsyncMock(return_value=True)):
-            response = self.client.post("/api/check-model", json={"model_id": "demo/model"})
+            response = self.client.post(
+                "/api/check-model",
+                json={"model_id": "demo/model", "api_key": "nvapi-test-key"},
+            )
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["valid"])
 
@@ -34,6 +38,54 @@ class ServerTests(unittest.TestCase):
             response = self.client.post("/api/check-credentials", json={"api_key": "demo"})
         self.assertEqual(response.status_code, 500)
         self.assertIn("network unavailable", response.json()["detail"])
+
+    def test_summon_rejects_duplicate_or_unknown_custom_agents(self):
+        response = self.client.post(
+            "/api/summon",
+            json={
+                "query": "Test",
+                "selected_agents": ["missing"],
+                "agents": [{"id": "agent-1", "name": "Custom", "persona_instruction": "Be concise.", "model": "openai/gpt-oss-20b"}],
+            },
+        )
+        self.assertEqual(response.status_code, 422)
+
+    def test_follow_up_chat_restricts_models_and_context_to_final_report_and_chat(self):
+        seen_messages = []
+
+        async def fake_stream_chat(_client, messages, model, reasoning_effort):
+            seen_messages.extend(messages)
+            self.assertEqual(model, "openai/gpt-oss-20b")
+            self.assertEqual(reasoning_effort, "medium")
+            yield StreamUpdate(reasoning="Reviewing")
+            yield StreamUpdate(delta="Answer")
+            yield StreamUpdate(usage={"prompt": 3, "completion": 2, "total": 5})
+
+        with patch.object(server.LLMClient, "stream_chat", new=fake_stream_chat):
+            response = self.client.post("/api/follow-up-chat", json={
+                "final_report": "Final consensus only.",
+                "messages": [
+                    {"role": "user", "content": "What is the conclusion?"},
+                    {"role": "assistant", "content": "It is cautious."},
+                    {"role": "user", "content": "Why?"},
+                ],
+                "model": "openai/gpt-oss-20b",
+            })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("event: chat_reasoning_chunk", response.text)
+        self.assertIn("event: chat_content_chunk", response.text)
+        self.assertIn("event: chat_done", response.text)
+        self.assertIn("Final consensus only.", seen_messages[0]["content"])
+        self.assertNotIn("DRAFT_SECRET", seen_messages[0]["content"])
+        self.assertEqual([message["role"] for message in seen_messages[1:]], ["user", "assistant", "user"])
+
+        invalid = self.client.post("/api/follow-up-chat", json={
+            "final_report": "Final consensus only.",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "model": "nvidia/unsupported",
+        })
+        self.assertEqual(invalid.status_code, 422)
 
 
 if __name__ == "__main__":

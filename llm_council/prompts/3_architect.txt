@@ -4,23 +4,24 @@ You do NOT write the final answer. You create the **Blueprint** that the Final W
 
 Your goal is to synthesize three sources of information into a single, perfect plan:
 1. The **User Query** (The requirement).
-2. The **Best Candidate Response** (The baseline draft).
-3. The **Critiques** (The peer-review feedback identifying errors or missing info).
+2. The **Two Finalist Responses** (the strongest drafts).
+3. Their **Metric Scorecards and Critiques** (peer-review strengths, weaknesses, and scores).
 
 ### INPUT DATA
 **Original User Query:**
 {query}
 
-**Best Draft Response:**
-{best_response}
+**Finalist Drafts, Scorecards, and Critiques:**
+{finalist_responses}
 
 **Consolidated Critiques:**
 {critiques}
 
 ### ARCHITECTURAL TASKS
-1. **Filter Noise:** Ignore vague critiques. Focus on specific corrections (e.g., "The code in Section 2 has a bug" or "Tone is too aggressive").
-2. **Structural Design:** Re-organize the content to be most effective for the user. (e.g., Should the summary come first? Do we need a code block?)
-3. **Gap Filling:** Identify what is *still* missing. Did the Draft answer the *entire* User Query? If not, list the missing facts explicitly.
+1. **Use the Scorecards:** Preserve strengths reflected in high metric scores and address weaknesses reflected in low metric scores.
+2. **Filter Noise:** Ignore vague critiques. Focus on specific corrections (e.g., "The code in Section 2 has a bug" or "Tone is too aggressive").
+3. **Structural Design:** Re-organize the content to be most effective for the user. (e.g., Should the summary come first? Do we need a code block?)
+4. **Gap Filling:** Identify what is *still* missing. Did the finalists answer the entire User Query? If not, list the missing facts explicitly.
 
 ### OUTPUT FORMAT
 Output a **SINGLE VALID JSON OBJECT**.

@@ -9,6 +9,7 @@ import type { Agent } from '@/store/types';
 import { PhaseArchitect } from './PhaseArchitect';
 import { PhaseCritic } from './PhaseCritic';
 import { PhaseFinalizer } from './PhaseFinalizer';
+import { PhaseFollowUpChat } from './PhaseFollowUpChat';
 import { PhaseGenerator } from './PhaseGenerator';
 
 export function CouncilTimeline() {
@@ -38,7 +39,7 @@ export function CouncilTimeline() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-10 px-6 py-12 pb-32">
+    <div className="mx-auto max-w-[1600px] space-y-10 px-6 py-12 pb-32">
       <section className="rounded-[28px] border border-[var(--border-base)] bg-[var(--bg-panel)]/80 p-6 shadow-[0_28px_90px_-50px_rgba(15,23,42,0.95)]">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -160,29 +161,28 @@ export function CouncilTimeline() {
           </div>
 
           {currentSession.metrics && (
-            <div className="flex justify-center gap-8 text-sm animate-in zoom-in duration-500 delay-300">
+            <div className="flex flex-wrap justify-center gap-5 text-sm animate-in zoom-in duration-500 delay-300">
               <div className="flex flex-col items-center gap-2">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                  Total Duration
-                </div>
-                <div className="flex items-center gap-2 rounded border border-[var(--border-base)] bg-[var(--bg-panel-secondary)] px-4 py-2 font-mono text-lg font-bold text-cyan-500">
-                  <Clock className="h-4 w-4 opacity-70" />
-                  {currentSession.metrics.totalTime?.toFixed(2) || '0.00'}s
-                </div>
+                <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Total Duration</div>
+                <div className="flex items-center gap-2 rounded border border-[var(--border-base)] bg-[var(--bg-panel-secondary)] px-4 py-2 font-mono text-lg font-bold text-cyan-500"><Clock className="h-4 w-4 opacity-70" />{currentSession.metrics.totalTime?.toFixed(2) || '0.00'}s</div>
               </div>
-              <div className="flex flex-col items-center gap-2">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                  Total Tokens
-                </div>
-                <div className="flex items-center gap-2 rounded border border-[var(--border-base)] bg-[var(--bg-panel-secondary)] px-4 py-2 font-mono text-lg font-bold text-cyan-500">
-                  <Hash className="h-4 w-4 opacity-70" />
-                  {currentSession.metrics.totalTokens?.total || 0}
-                </div>
-              </div>
+              <TokenTotal label="Input Tokens" value={currentSession.metrics.totalTokens?.prompt || 0} />
+              <TokenTotal label="Output Tokens" value={currentSession.metrics.totalTokens?.completion || 0} />
+              <TokenTotal label="Total Tokens" value={currentSession.metrics.totalTokens?.total || 0} />
             </div>
           )}
+          {currentSession.status === 'completed' && currentSession.finalizerText.trim() && <PhaseFollowUpChat />}
         </div>
       )}
+    </div>
+  );
+}
+
+function TokenTotal({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">{label}</div>
+      <div className="flex items-center gap-2 rounded border border-[var(--border-base)] bg-[var(--bg-panel-secondary)] px-4 py-2 font-mono text-lg font-bold text-cyan-500"><Hash className="h-4 w-4 opacity-70" />{value}</div>
     </div>
   );
 }

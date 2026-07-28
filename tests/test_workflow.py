@@ -3,11 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from llm_council.prompts import load_prompt_set
 from llm_council.settings import get_settings
-from llm_council.workflow import CouncilWorkflow, WorkflowRequest, select_active_agents
+from llm_council.workflow import CouncilWorkflow, WorkflowRequest, aggregate_critic_reviews, balanced_critic_batches, select_active_agents
 
 
 class FakeClient:
@@ -19,6 +20,15 @@ class FakeClient:
         if isinstance(next_response, Exception):
             raise next_response
         return next_response
+
+    async def stream_generate(self, *args, **kwargs):
+        next_response = await self.generate(*args, **kwargs)
+        content, usage = next_response
+        midpoint = max(1, len(content) // 2)
+        yield type("Update", (), {"delta": content[:midpoint], "usage": None})()
+        await asyncio.sleep(0)
+        yield type("Update", (), {"delta": content[midpoint:], "usage": None})()
+        yield type("Update", (), {"delta": "", "usage": usage})()
 
 
 class WorkflowTests(unittest.IsolatedAsyncioTestCase):
@@ -39,10 +49,27 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[0]["type"], "error")
         self.assertEqual(events[-1]["type"], "done")
 
+    async def test_missing_nvidia_key_emits_a_setup_error_without_crashing_stream(self):
+        settings = replace(get_settings(), use_mock_mode=False, nvidia_api_key=None)
+        workflow = CouncilWorkflow(settings=settings)
+
+        events = [
+            event
+            async for event in workflow.stream(
+                WorkflowRequest(query="Test", selected_agents=["The Academic"])
+            )
+        ]
+
+        self.assertEqual(events[0]["type"], "error")
+        self.assertIn("NVIDIA_API_KEY is not configured", events[0]["message"])
+        self.assertFalse(events[0]["recoverable"])
+        self.assertEqual(events[-1]["type"], "done")
+
     async def test_single_agent_path_auto_wins_critic_phase(self):
         fake_client = FakeClient(
             [
                 ("Draft from The Academic", {"prompt": 10, "completion": 5, "total": 15}),
+                (json.dumps({"reviews": {"The Academic": {"metric_scores": {"accuracy": 9, "relevance": 9, "completeness": 9, "clarity": 9, "practical_usefulness": 9}, "critique": "Strong."}}}), {"prompt": 2, "completion": 2, "total": 4}),
                 (
                     json.dumps(
                         {
@@ -72,6 +99,48 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         critic_event = next(event for event in events if event["type"] == "critic_result")
         self.assertEqual(critic_event["winner_id"], "The Academic")
         self.assertTrue(any(event["type"] == "finalizer_done" for event in events))
+
+    async def test_custom_agent_uses_its_prompt_and_model(self):
+        class RecordingClient(FakeClient):
+            def __init__(self, responses):
+                super().__init__(responses)
+                self.calls = []
+
+            async def stream_generate(self, *args, **kwargs):
+                self.calls.append((args, kwargs))
+                async for update in super().stream_generate(*args, **kwargs):
+                    yield update
+
+        fake_client = RecordingClient([
+            ("Custom draft", {"prompt": 1, "completion": 1, "total": 2}),
+            (json.dumps({"reviews": {"Custom Agent": {"metric_scores": {"accuracy": 9, "relevance": 9, "completeness": 9, "clarity": 9, "practical_usefulness": 9}, "critique": "Strong."}}}), {"prompt": 1, "completion": 1, "total": 2}),
+            (json.dumps({"structure": ["Intro"], "tone_guidelines": "Clear", "missing_facts_to_add": [], "critique_integration": "Use it."}), {"prompt": 1, "completion": 1, "total": 2}),
+            ("Final", {"prompt": 1, "completion": 1, "total": 2}),
+        ])
+        workflow = CouncilWorkflow(settings=get_settings(), client_factory=lambda **kwargs: fake_client)
+        events = [event async for event in workflow.stream(WorkflowRequest(
+            query="Test", selected_agents=["custom"],
+            custom_agents=[{"id": "custom", "name": "Custom Agent", "persona_instruction": "CUSTOM DIRECTIVE", "model": "model/custom"}],
+        ))]
+
+        self.assertTrue(any(event.get("agent") == "Custom Agent" for event in events))
+        self.assertIn("CUSTOM DIRECTIVE", fake_client.calls[0][0][0])
+        self.assertEqual(fake_client.calls[0][1]["model"], "model/custom")
+        self.assertNotIn("max_tokens", fake_client.calls[0][1])
+        self.assertEqual(fake_client.calls[0][1]["reasoning_effort"], "low")
+        self.assertIn("SCORECARD", fake_client.calls[2][0][0])
+        self.assertIn("SCORECARD", fake_client.calls[3][0][0])
+
+    async def test_critic_batches_balance_and_rank_finalists_deterministically(self):
+        responses = [{"persona": f"Agent {index}", "content": "draft"} for index in range(5)]
+        self.assertEqual([len(batch) for batch in balanced_critic_batches(responses)], [3, 2])
+        reviews = {
+            "Agent 0": {"metric_scores": {"accuracy": 8, "relevance": 8, "completeness": 8, "clarity": 8, "practical_usefulness": 8}, "critique": "A"},
+            "Agent 1": {"metric_scores": {"accuracy": 9, "relevance": 8, "completeness": 8, "clarity": 8, "practical_usefulness": 7}, "critique": "B"},
+            "Agent 2": {"metric_scores": {"accuracy": 8, "relevance": 8, "completeness": 8, "clarity": 8, "practical_usefulness": 8}, "critique": "C"},
+        }
+        result = aggregate_critic_reviews(reviews, responses)
+        self.assertEqual(result["finalists"], ["Agent 1", "Agent 0"])
 
     async def test_generator_failure_emits_error(self):
         fake_client = FakeClient([RuntimeError("boom")])

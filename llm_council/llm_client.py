@@ -49,6 +49,7 @@ class LLMClient:
         schema: Optional[Any] = None,
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
+        include_reasoning: bool = False,
     ) -> AsyncIterator[StreamUpdate]:
         """Yield true NVIDIA NIM deltas followed by terminal token usage."""
         if self.mock_mode:
@@ -64,6 +65,7 @@ class LLMClient:
             schema=schema,
             model=model,
             reasoning_effort=reasoning_effort,
+            include_reasoning=include_reasoning,
         ):
             yield update
 

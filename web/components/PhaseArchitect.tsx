@@ -8,6 +8,7 @@ export function PhaseArchitect() {
   const { currentSessionId, sessions } = useCouncilStore();
   const currentSession = sessions.find((session) => session.id === currentSessionId);
   const architectData = currentSession?.architectData;
+  const architectThinking = currentSession?.architectThinking;
 
   if (!architectData) {
     if (!currentSession?.architectModel) return null;
@@ -16,6 +17,7 @@ export function PhaseArchitect() {
         <p className="text-xs font-bold uppercase tracking-[0.2em] text-indigo-400">Blueprint in progress</p>
         <p className="mt-3 text-sm text-[var(--text-muted)]">The architect is assembling a validated response blueprint.</p>
         <div className="mt-4 h-1.5 w-2/3 animate-pulse rounded-full bg-indigo-500" />
+        {architectThinking && <div className="mt-5 rounded-xl border border-indigo-500/20 bg-[var(--bg-panel)]/60 p-4"><p className="text-[10px] font-bold uppercase tracking-[0.16em] text-indigo-300">Thinking: Architect</p><p className="mt-2 max-h-36 overflow-y-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-[var(--text-muted)]">{architectThinking}</p></div>}
       </div>
     );
   }

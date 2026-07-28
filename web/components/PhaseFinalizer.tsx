@@ -12,6 +12,7 @@ export function PhaseFinalizer() {
     const { currentSessionId, sessions } = useCouncilStore();
     const currentSession = sessions.find(s => s.id === currentSessionId);
     const finalizerText = currentSession?.finalizerText;
+    const finalizerThinking = currentSession?.finalizerThinking;
     const [copied, setCopied] = useState(false);
 
     const handleCopy = () => {
@@ -42,6 +43,7 @@ export function PhaseFinalizer() {
 
             {/* Document Body */}
             <div className="p-8 font-serif text-lg leading-relaxed max-w-none text-[var(--text-main)]">
+                {finalizerThinking && <div className="mb-6 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4 font-sans"><p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-300">Thinking: Finalizer</p><p className="mt-2 max-h-36 overflow-y-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-[var(--text-muted)]">{finalizerThinking}</p></div>}
                 <div className="prose prose-lg dark:prose-invert max-w-none prose-headings:text-[var(--text-main)] prose-p:text-[var(--text-main)] prose-strong:text-[var(--text-main)] prose-li:text-[var(--text-main)]">
                     {finalizerText ? <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>{finalizerText}</ReactMarkdown> : <p className="italic text-[var(--text-muted)]">Synthesis is starting...</p>}
                 </div>

@@ -72,6 +72,29 @@ test('live phase buffers preserve generator tabs and structured progress', () =>
   assert.equal(session.architectStream, '{"structure":');
 });
 
+test('critic thinking remains live only until its critic batch completes', () => {
+  let session = createSession('thinking', 'Review this', agents);
+  session = applyCouncilEvent(session, { type: 'critic_start', model: 'openai/gpt-oss-120b', batch: 1, total_batches: 2 });
+  session = applyCouncilEvent(session, { type: 'critic_thinking', batch: 1, chunk: 'Assessing accuracy.' });
+  assert.equal(session.criticThinking[1], 'Assessing accuracy.');
+  session = applyCouncilEvent(session, { type: 'critic_thinking_done', batch: 1 });
+  assert.equal(session.criticThinking[1], undefined);
+});
+
+test('generator, architect, and finalizer thinking clears when each phase completes', () => {
+  let session = createSession('all-thinking', 'Review this', agents);
+  session = applyCouncilEvent(session, { type: 'generator_thinking', agent: 'The Academic', chunk: 'Drafting.' });
+  session = applyCouncilEvent(session, { type: 'generator_thinking_done', agent: 'The Academic' });
+  session = applyCouncilEvent(session, { type: 'architect_thinking', chunk: 'Planning.' });
+  session = applyCouncilEvent(session, { type: 'architect_thinking_done' });
+  session = applyCouncilEvent(session, { type: 'finalizer_thinking', chunk: 'Synthesizing.' });
+  session = applyCouncilEvent(session, { type: 'finalizer_thinking_done' });
+
+  assert.equal(session.generatorThinking['The Academic'], undefined);
+  assert.equal(session.architectThinking, '');
+  assert.equal(session.finalizerThinking, '');
+});
+
 test('follow-up chat keeps reasoning, answer, and usage in the session', () => {
   let session = createSession('4', 'Follow up', agents);
   session.status = 'completed';

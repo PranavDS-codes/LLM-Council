@@ -112,6 +112,11 @@ class ServerTests(unittest.TestCase):
         self.assertTrue(any(message.startswith(": keepalive") for message in messages))
         self.assertTrue(any("event: done" in message for message in messages))
 
+    def test_summon_uses_sse_anti_buffering_headers(self):
+        response = self.client.post("/api/summon", json={"query": "Test", "selected_agents": []})
+        self.assertEqual(response.headers["cache-control"], "no-cache, no-transform")
+        self.assertEqual(response.headers["x-accel-buffering"], "no")
+
 
 if __name__ == "__main__":
     unittest.main()

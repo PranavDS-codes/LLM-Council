@@ -13,6 +13,7 @@ export function PhaseGenerator() {
   const { currentSessionId, sessions } = useCouncilStore();
   const currentSession = sessions.find((session) => session.id === currentSessionId);
   const generatorStreams = currentSession?.generatorStreams || {};
+  const generatorThinking = currentSession?.generatorThinking || {};
   const agentModels = currentSession?.agentModels || {};
   const selectedAgentNames =
     currentSession?.agents.filter((agent) => agent.selected).map((agent) => agent.name) || [];
@@ -85,6 +86,13 @@ export function PhaseGenerator() {
                 </p>
               </div>
             </div>
+          </div>
+        )}
+
+        {currentTab && generatorThinking[currentTab] && (
+          <div className="mb-4 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4">
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-300">Thinking: {currentTab}</p>
+            <p className="mt-2 max-h-28 overflow-y-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-[var(--text-muted)]">{generatorThinking[currentTab]}</p>
           </div>
         )}
 

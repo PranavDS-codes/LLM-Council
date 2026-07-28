@@ -30,3 +30,13 @@ test('parseFollowUpSseChunk keeps reasoning separate from answer content', () =>
   const parsed = parseFollowUpSseChunk('', 'event: chat_reasoning_chunk\ndata: {"chunk":"Think"}\n\nevent: chat_content_chunk\ndata: {"chunk":"Answer"}\n\nevent: chat_done\ndata: {"model":"openai/gpt-oss-20b","usage":{"prompt":2,"completion":3,"total":5}}\n\n');
   assert.deepEqual(parsed.events.map((event) => event.type), ['chat_reasoning_chunk', 'chat_content_chunk', 'chat_done']);
 });
+
+test('parseSseChunk accepts temporary per-critic thinking events', () => {
+  const parsed = parseSseChunk('', 'event: critic_thinking\ndata: {"batch":2,"chunk":"Checking evidence"}\n\nevent: critic_thinking_done\ndata: {"batch":2}\n\n');
+  assert.deepEqual(parsed.events.map((event) => event.type), ['critic_thinking', 'critic_thinking_done']);
+});
+
+test('parseSseChunk accepts temporary thinking events for all council phases', () => {
+  const parsed = parseSseChunk('', 'event: generator_thinking\ndata: {"agent":"The Academic","chunk":"Drafting"}\n\nevent: architect_thinking\ndata: {"chunk":"Planning"}\n\nevent: finalizer_thinking\ndata: {"chunk":"Synthesizing"}\n\n');
+  assert.deepEqual(parsed.events.map((event) => event.type), ['generator_thinking', 'architect_thinking', 'finalizer_thinking']);
+});

@@ -29,15 +29,19 @@ export function createSession(id: string, query: string, agents: Agent[]): Counc
     activePhase: 1,
     status: 'streaming',
     generatorStreams: {},
+    generatorThinking: {},
     agentModels: {},
     criticStream: '',
     criticProgress: null,
+    criticThinking: {},
     criticData: null,
     architectStream: '',
+    architectThinking: '',
     architectModel: null,
     architectData: null,
     finalizerModel: null,
     finalizerText: '',
+    finalizerThinking: '',
     followUpChat: {
       selectedModel: 'openai/gpt-oss-20b',
       messages: [],
@@ -232,6 +236,21 @@ export function applyCouncilEvent(session: CouncilSession, event: CouncilEvent):
       return nextSession;
     }
 
+    case 'generator_thinking':
+      return {
+        ...session,
+        generatorThinking: {
+          ...session.generatorThinking,
+          [event.agent]: `${session.generatorThinking[event.agent] || ''}${event.chunk}`,
+        },
+      };
+
+    case 'generator_thinking_done': {
+      const generatorThinking = { ...session.generatorThinking };
+      delete generatorThinking[event.agent];
+      return { ...session, generatorThinking };
+    }
+
     case 'generator_done': {
       const nextSession = updateGeneratorMetric(session, event);
       nextSession.summary = getSessionSummary(nextSession);
@@ -260,6 +279,7 @@ export function applyCouncilEvent(session: CouncilSession, event: CouncilEvent):
         status: 'streaming',
         criticStream: '',
         criticProgress: { batch: event.batch, totalBatches: event.total_batches, model: event.model },
+        criticThinking: { ...session.criticThinking, [event.batch]: '' },
       };
       nextSession.summary = getSessionSummary(nextSession);
       return nextSession;
@@ -267,6 +287,21 @@ export function applyCouncilEvent(session: CouncilSession, event: CouncilEvent):
 
     case 'critic_chunk':
       return { ...session, criticStream: `${session.criticStream}${event.chunk}` };
+
+    case 'critic_thinking':
+      return {
+        ...session,
+        criticThinking: {
+          ...session.criticThinking,
+          [event.batch]: `${session.criticThinking[event.batch] || ''}${event.chunk}`,
+        },
+      };
+
+    case 'critic_thinking_done': {
+      const criticThinking = { ...session.criticThinking };
+      delete criticThinking[event.batch];
+      return { ...session, criticThinking };
+    }
 
     case 'critic_done':
       return { ...session, criticProgress: null };
@@ -301,6 +336,12 @@ export function applyCouncilEvent(session: CouncilSession, event: CouncilEvent):
     case 'architect_chunk':
       return { ...session, architectStream: `${session.architectStream}${event.chunk}` };
 
+    case 'architect_thinking':
+      return { ...session, architectThinking: `${session.architectThinking}${event.chunk}` };
+
+    case 'architect_thinking_done':
+      return { ...session, architectThinking: '' };
+
     case 'finalizer_start': {
       const nextSession: CouncilSession = {
         ...session,
@@ -322,6 +363,12 @@ export function applyCouncilEvent(session: CouncilSession, event: CouncilEvent):
       nextSession.summary = getSessionSummary(nextSession);
       return nextSession;
     }
+
+    case 'finalizer_thinking':
+      return { ...session, finalizerThinking: `${session.finalizerThinking}${event.chunk}` };
+
+    case 'finalizer_thinking_done':
+      return { ...session, finalizerThinking: '' };
 
     case 'finalizer_done': {
       const withMetric = updatePhaseMetric(session, 'finalizer', event);

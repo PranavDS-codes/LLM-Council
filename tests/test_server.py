@@ -95,6 +95,52 @@ class ServerTests(unittest.TestCase):
         })
         self.assertEqual(invalid.status_code, 422)
 
+    def test_follow_up_chat_creates_a_trace_for_the_grounded_conversation(self):
+        class RecordingRun:
+            def mark_first_delta(self):
+                pass
+
+            def finish(self, **kwargs):
+                pass
+
+        class RecordingTracer:
+            def __init__(self):
+                self.root = None
+                self.llm = None
+                self.finished = False
+
+            def start_root(self, name, inputs, **kwargs):
+                self.root = (name, inputs)
+                return RecordingRun()
+
+            def start_llm(self, name, inputs, **kwargs):
+                self.llm = (name, inputs)
+                return RecordingRun()
+
+            def finish_root(self, **kwargs):
+                self.finished = True
+
+            def finalize(self):
+                pass
+
+        async def fake_stream_chat(_client, messages, model, reasoning_effort):
+            yield StreamUpdate(delta="Grounded answer")
+            yield StreamUpdate(usage={"prompt": 3, "completion": 2, "total": 5})
+
+        tracer = RecordingTracer()
+        with patch.object(server.LLMClient, "stream_chat", new=fake_stream_chat), patch.object(server, "new_tracer", return_value=tracer):
+            response = self.client.post("/api/follow-up-chat", json={
+                "final_report": "Final consensus only.",
+                "messages": [{"role": "user", "content": "What is the conclusion?"}],
+                "model": "openai/gpt-oss-20b",
+            })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(tracer.root[0], "Council Follow-Up Chat")
+        self.assertEqual(tracer.root[1]["final_report"], "Final consensus only.")
+        self.assertEqual(tracer.llm[0], "Follow-Up Response")
+        self.assertTrue(tracer.finished)
+
     def test_summon_stream_sends_keepalives_while_waiting_for_workflow_events(self):
         async def delayed_events(_request):
             await asyncio.sleep(0.02)

@@ -76,6 +76,10 @@ class Settings:
     cors_allow_origin_regex: str | None
     enable_trace_logs: bool
     trace_log_dir: Path
+    langsmith_tracing: bool
+    langsmith_api_key: str | None
+    langsmith_endpoint: str
+    langsmith_project: str
     port: int
     reload: bool
 
@@ -93,6 +97,10 @@ def get_settings() -> Settings:
         cors_allow_origin_regex=_env_optional("CORS_ALLOW_ORIGIN_REGEX"),
         enable_trace_logs=_env_flag("ENABLE_TRACE_LOGS", False),
         trace_log_dir=Path(os.getenv("TRACE_LOG_DIR", str(PACKAGE_DIR / "logs"))),
+        langsmith_tracing=_env_flag("LANGSMITH_TRACING", False),
+        langsmith_api_key=_env_optional("LANGSMITH_API_KEY"),
+        langsmith_endpoint=os.getenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com"),
+        langsmith_project=os.getenv("LANGSMITH_PROJECT", "llm-souncil-prod"),
         port=int(os.getenv("PORT", "8000")),
         reload=_env_flag("RELOAD", False),
     )

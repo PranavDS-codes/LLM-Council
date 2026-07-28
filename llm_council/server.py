@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from .llm_client import LLMClient
 from .settings import DEFAULT_MODEL_MAP, PERSONA, get_settings
+from .tracer import WorkflowTracer
 from .workflow import CouncilWorkflow, WorkflowRequest
 
 settings = get_settings()
@@ -100,6 +101,17 @@ def format_sse(event_type: str, data: dict[str, Any]) -> str:
     return f"event: {event_type}\ndata: {json.dumps(payload)}\n\n"
 
 
+def new_tracer() -> WorkflowTracer:
+    return WorkflowTracer(
+        enabled=settings.enable_trace_logs,
+        log_dir=settings.trace_log_dir,
+        langsmith_tracing=settings.langsmith_tracing,
+        langsmith_api_key=settings.langsmith_api_key,
+        langsmith_endpoint=settings.langsmith_endpoint,
+        langsmith_project=settings.langsmith_project,
+    )
+
+
 async def stream_workflow(request: SummonRequest) -> AsyncIterator[str]:
     event_iterator = workflow.stream(
         WorkflowRequest(
@@ -135,6 +147,7 @@ async def stream_workflow(request: SummonRequest) -> AsyncIterator[str]:
 async def stream_follow_up_chat(request: FollowUpChatRequest) -> AsyncIterator[str]:
     """Stream a report-grounded conversation without exposing council internals as context."""
     client = LLMClient(api_key=request.custom_api_key, settings=settings)
+    tracer = new_tracer()
     messages = [
         {
             "role": "system",
@@ -149,17 +162,43 @@ async def stream_follow_up_chat(request: FollowUpChatRequest) -> AsyncIterator[s
         },
         *[message.model_dump() for message in request.messages],
     ]
+    tracer.start_root(
+        "Council Follow-Up Chat",
+        {"final_report": request.final_report, "messages": [message.model_dump() for message in request.messages], "model": request.model},
+        metadata={"workflow": "follow_up_chat"},
+    )
+    chat_trace = tracer.start_llm(
+        "Follow-Up Response",
+        {"messages": messages},
+        metadata={"stage": "follow_up_chat", "model": request.model, "reasoning_effort": "medium"},
+    )
+    content = ""
+    usage = {"prompt": 0, "completion": 0, "total": 0}
     yield format_sse("chat_start", {"model": request.model})
     try:
         async for update in client.stream_chat(messages, model=request.model, reasoning_effort="medium"):
             if update.reasoning:
                 yield format_sse("chat_reasoning_chunk", {"chunk": update.reasoning})
             if update.delta:
+                chat_trace.mark_first_delta()
+                content += update.delta
                 yield format_sse("chat_content_chunk", {"chunk": update.delta})
             if update.usage is not None:
+                usage = update.usage
                 yield format_sse("chat_done", {"model": request.model, "usage": update.usage})
+    except asyncio.CancelledError:
+        chat_trace.finish(outputs={"visible_output": content}, usage=usage, error="Follow-up chat cancelled")
+        tracer.finish_root(error="Follow-up chat cancelled", usage=usage)
+        raise
     except Exception as exc:
+        chat_trace.finish(outputs={"visible_output": content}, usage=usage, error=exc)
+        tracer.finish_root(error=exc, usage=usage)
         yield format_sse("chat_error", {"message": str(exc), "recoverable": True})
+    else:
+        chat_trace.finish(outputs={"visible_output": content}, usage=usage)
+        tracer.finish_root(outputs={"visible_output": content}, usage=usage)
+    finally:
+        tracer.finalize()
 
 
 @app.get("/health")

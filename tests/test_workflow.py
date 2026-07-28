@@ -31,6 +31,57 @@ class FakeClient:
         yield type("Update", (), {"delta": "", "usage": usage})()
 
 class WorkflowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_council_tracing_covers_every_stage(self):
+        class RecordingRun:
+            def mark_first_delta(self):
+                pass
+
+            def finish(self, **kwargs):
+                pass
+
+        class RecordingTracer:
+            def __init__(self):
+                self.root = None
+                self.llm_names = []
+                self.root_finished = False
+
+            def start_root(self, name, inputs, **kwargs):
+                self.root = (name, inputs)
+                return RecordingRun()
+
+            def start_llm(self, name, inputs, **kwargs):
+                self.llm_names.append(name)
+                return RecordingRun()
+
+            def finish_root(self, **kwargs):
+                self.root_finished = True
+
+            def log_step(self, *args, **kwargs):
+                pass
+
+            def finalize(self):
+                pass
+
+        tracer = RecordingTracer()
+        client = FakeClient([
+            ("Draft", {"prompt": 1, "completion": 1, "total": 2}),
+            (json.dumps({"reviews": {"The Academic": {"metric_scores": {"accuracy": 9, "relevance": 9, "completeness": 9, "clarity": 9, "practical_usefulness": 9}, "critique": "Strong."}}}), {"prompt": 1, "completion": 1, "total": 2}),
+            (json.dumps({"structure": ["Intro"], "tone_guidelines": "Clear", "missing_facts_to_add": [], "critique_integration": "Use it."}), {"prompt": 1, "completion": 1, "total": 2}),
+            ("Final", {"prompt": 1, "completion": 1, "total": 2}),
+        ])
+        workflow = CouncilWorkflow(
+            settings=get_settings(),
+            client_factory=lambda **kwargs: client,
+            tracer_factory=lambda **kwargs: tracer,
+        )
+
+        _events = [event async for event in workflow.stream(WorkflowRequest(query="Trace this", selected_agents=["The Academic"]))]
+
+        self.assertEqual(tracer.root[0], "Council Meeting")
+        self.assertEqual(tracer.root[1]["query"], "Trace this")
+        self.assertEqual(tracer.llm_names, ["Generator: The Academic", "Critic Batch 1", "Blueprint Architect", "Final Synthesis"])
+        self.assertTrue(tracer.root_finished)
+
     async def test_select_active_agents_filters_invalid_personas(self):
         self.assertEqual(
             select_active_agents(["The Academic", "Not Real", "The Skeptic"]),

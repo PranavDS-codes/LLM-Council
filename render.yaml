@@ -13,6 +13,14 @@ services:
         value: false
       - key: ENABLE_TRACE_LOGS
         value: false
+      - key: LANGSMITH_TRACING
+        value: false
+      - key: LANGSMITH_API_KEY
+        sync: false
+      - key: LANGSMITH_ENDPOINT
+        value: https://api.smith.langchain.com
+      - key: LANGSMITH_PROJECT
+        value: llm-souncil-prod
       - key: NVIDIA_API_KEY
         sync: false
       - key: NVIDIA_API_BASE_URL

@@ -36,6 +36,10 @@ Important variables:
 - `NVIDIA_API_BASE_URL`: defaults to `https://integrate.api.nvidia.com/v1`
 - `USE_MOCK_MODE=true|false`: run fake responses instead of real API calls. Defaults to `false`.
 - `ENABLE_TRACE_LOGS=true|false`: write markdown traces to `llm_council/logs/`
+- `LANGSMITH_TRACING=true|false`: publish production traces when a LangSmith key is configured
+- `LANGSMITH_API_KEY`: LangSmith workspace API key, stored as a Render secret
+- `LANGSMITH_ENDPOINT`: defaults to `https://api.smith.langchain.com`
+- `LANGSMITH_PROJECT`: defaults to `llm-souncil-prod`
 - `CORS_ALLOW_ORIGINS`: comma-separated allowed frontend origins
 - `CORS_ALLOW_ORIGIN_REGEX`: optional regex for preview domains such as Vercel previews
 
@@ -89,6 +93,12 @@ Suggested environment values:
 - `USE_MOCK_MODE`: `false`
 - `CORS_ALLOW_ORIGINS`: your production frontend URL, for example `https://your-app.vercel.app`
 - `CORS_ALLOW_ORIGIN_REGEX`: optional preview support, for example `^https://.*\.vercel\.app$`
+- `LANGSMITH_TRACING`: `true` to publish traces
+- `LANGSMITH_API_KEY`: LangSmith API key, configured as a secret
+- `LANGSMITH_ENDPOINT`: `https://api.smith.langchain.com`
+- `LANGSMITH_PROJECT`: `llm-souncil-prod`
+
+LangSmith captures visible queries, prompts, model outputs, metrics, errors, and follow-up chat context. NVIDIA and LangSmith credentials plus hidden reasoning fields are redacted before traces are sent.
 
 ### Frontend on Vercel
 

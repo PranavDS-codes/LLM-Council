@@ -174,12 +174,26 @@ class CouncilWorkflow:
         return self.tracer_factory(
             enabled=self.settings.enable_trace_logs,
             log_dir=self.settings.trace_log_dir,
+            langsmith_tracing=self.settings.langsmith_tracing,
+            langsmith_api_key=self.settings.langsmith_api_key,
+            langsmith_endpoint=self.settings.langsmith_endpoint,
+            langsmith_project=self.settings.langsmith_project,
         )
 
     async def stream(self, request: WorkflowRequest) -> AsyncIterator[CouncilEvent]:
         tracer = self._new_tracer()
         workflow_start = time.perf_counter()
         total_tokens: UsageDict = {"prompt": 0, "completion": 0, "total": 0}
+        tracer.start_root(
+            "Council Meeting",
+            {
+                "query": request.query,
+                "selected_agents": request.selected_agents,
+                "agent_registry": request.custom_agents,
+                "model_overrides": request.custom_model_map,
+            },
+            metadata={"workflow": "council", "mock_mode": self.settings.use_mock_mode},
+        )
 
         def add_usage(usage: UsageDict) -> None:
             total_tokens["prompt"] += usage.get("prompt", 0)
@@ -201,6 +215,8 @@ class CouncilWorkflow:
             ]
         if not active_agents:
             yield {"type": "error", "message": "No valid agents selected.", "phase": "generator", "recoverable": False}
+            tracer.finish_root(error="No valid agents selected.", usage=total_tokens)
+            tracer.finalize()
             yield {"type": "done", "total_execution_time": 0.0, "total_tokens": total_tokens}
             return
 
@@ -215,6 +231,7 @@ class CouncilWorkflow:
                 "phase": "generator",
                 "recoverable": False,
             }
+            tracer.finish_root(error="NVIDIA_API_KEY is not configured.", usage=total_tokens)
             tracer.finalize()
             yield {"type": "done", "total_execution_time": time.perf_counter() - workflow_start, "total_tokens": total_tokens}
             return
@@ -243,6 +260,11 @@ class CouncilWorkflow:
                 query=request.query,
             )
             model_id = agent["model"]
+            generator_trace = tracer.start_llm(
+                f"Generator: {agent_name}",
+                {"query": request.query, "prompt": prompt},
+                metadata={"stage": "generator", "agent": agent_name, "model": model_id, "reasoning_effort": "low"},
+            )
             yield {"type": "generator_start", "agent": agent_name, "model": model_id}
             started_at = time.perf_counter()
             async def pump_generator(
@@ -250,6 +272,7 @@ class CouncilWorkflow:
                 model: str = model_id,
                 started: float = started_at,
                 generator_prompt: str = prompt,
+                trace_run: Any = generator_trace,
             ) -> None:
                 content = ""
                 usage: UsageDict = {"prompt": 0, "completion": 0, "total": 0}
@@ -265,6 +288,7 @@ class CouncilWorkflow:
                         if reasoning:
                             await generator_queue.put(("thinking", name, reasoning))
                         if update.delta:
+                            trace_run.mark_first_delta()
                             content += update.delta
                             await generator_queue.put(("chunk", name, update.delta))
                         if update.usage is not None:
@@ -272,8 +296,12 @@ class CouncilWorkflow:
                     if not content.strip():
                         raise RuntimeError("The model completed without visible answer text. Try running this agent again.")
                     await generator_queue.put(("thinking_done", name, None))
-                    await generator_queue.put(("done", name, (content, usage, model, started)))
+                    await generator_queue.put(("done", name, (content, usage, model, started, trace_run)))
+                except asyncio.CancelledError:
+                    trace_run.finish(outputs={"visible_output": content}, usage=usage, error="Generator cancelled")
+                    raise
                 except Exception as exc:  # pragma: no cover - defensive async boundary
+                    trace_run.finish(outputs={"visible_output": content}, usage=usage, error=exc)
                     await generator_queue.put(("thinking_done", name, None))
                     await generator_queue.put(("error", name, exc))
 
@@ -290,10 +318,15 @@ class CouncilWorkflow:
                 elif event_type == "thinking_done":
                     yield {"type": "generator_thinking_done", "agent": agent_name}
                 elif event_type == "done":
-                    response_content, usage, model_id, started_at = payload
+                    response_content, usage, model_id, started_at, trace_run = payload
                     duration = time.perf_counter() - started_at
                     add_usage(usage)
                     responses_by_agent[agent_name] = response_content
+                    trace_run.finish(
+                        outputs={"visible_output": response_content},
+                        usage=usage,
+                        metadata={"duration_seconds": round(duration, 4)},
+                    )
                     tracer.log_step("Generators", f"Generator-{agent_name}", request.query, response_content)
                     yield {
                         "type": "generator_done", "agent": agent_name, "time_taken": duration,
@@ -314,6 +347,8 @@ class CouncilWorkflow:
             for task in generator_tasks:
                 task.cancel()
             await asyncio.gather(*generator_tasks, return_exceptions=True)
+            tracer.finish_root(error="Council meeting cancelled during generator phase.", usage=total_tokens)
+            tracer.finalize()
             raise
 
         responses = [
@@ -330,6 +365,7 @@ class CouncilWorkflow:
                 "phase": "generator",
                 "recoverable": False,
             }
+            tracer.finish_root(error="All generators failed before the council could produce a draft.", usage=total_tokens)
             tracer.finalize()
             yield {
                 "type": "done",
@@ -346,12 +382,18 @@ class CouncilWorkflow:
         for batch_index, batch in enumerate(critic_batches, start=1):
             formatted_text = self._format_responses_for_critic(batch)
             prompt = self.prompts.critic.format(query=request.query, formatted_responses=formatted_text)
+            critic_trace = tracer.start_llm(
+                f"Critic Batch {batch_index}",
+                {"query": request.query, "prompt": prompt, "drafts": batch},
+                metadata={"stage": "critic", "batch": batch_index, "total_batches": len(critic_batches), "model": critic_model, "reasoning_effort": "high"},
+            )
             yield {"type": "critic_start", "model": critic_model, "batch": batch_index, "total_batches": len(critic_batches)}
 
             async def pump_critic(
                 index: int = batch_index,
                 critic_prompt: str = prompt,
                 critic_batch: list[dict[str, str]] = batch,
+                trace_run: Any = critic_trace,
             ) -> None:
                 chunks: list[str] = []
                 usage: UsageDict = {"prompt": 0, "completion": 0, "total": 0}
@@ -368,12 +410,17 @@ class CouncilWorkflow:
                         if reasoning:
                             await critic_queue.put(("thinking", index, reasoning))
                         if update.delta:
+                            trace_run.mark_first_delta()
                             chunks.append(update.delta)
                             await critic_queue.put(("chunk", index, update.delta))
                         if update.usage is not None:
                             usage = update.usage
-                    await critic_queue.put(("done", index, (critic_batch, critic_prompt, "".join(chunks), usage, started, model_used)))
+                    await critic_queue.put(("done", index, (critic_batch, critic_prompt, "".join(chunks), usage, started, model_used, trace_run)))
+                except asyncio.CancelledError:
+                    trace_run.finish(outputs={"visible_output": "".join(chunks)}, usage=usage, error="Critic cancelled")
+                    raise
                 except Exception as exc:  # pragma: no cover - defensive async boundary
+                    trace_run.finish(outputs={"visible_output": "".join(chunks)}, usage=usage, error=exc)
                     await critic_queue.put(("error", index, exc))
 
             critic_tasks.append(asyncio.create_task(pump_critic()))
@@ -398,7 +445,7 @@ class CouncilWorkflow:
                     unfinished_critics -= 1
                     continue
 
-                batch, prompt, critic_json, usage, started, model_used = payload
+                batch, prompt, critic_json, usage, started, model_used, trace_run = payload
                 duration = time.perf_counter() - started
                 critic_time += duration
                 critic_models_used.append(model_used)
@@ -409,13 +456,18 @@ class CouncilWorkflow:
                 try:
                     collected_reviews.update(parse_critic_batch(critic_json, {item["persona"] for item in batch}))
                 except (ValueError, TypeError) as exc:
+                    trace_run.finish(outputs={"visible_output": critic_json}, usage=usage, error=exc)
                     yield {"type": "error", "message": f"Critic {batch_index} returned invalid scorecards: {exc}", "phase": "critic", "recoverable": True}
+                else:
+                    trace_run.finish(outputs={"visible_output": critic_json}, usage=usage)
                 yield {"type": "critic_thinking_done", "batch": batch_index}
                 unfinished_critics -= 1
         except asyncio.CancelledError:
             for task in critic_tasks:
                 task.cancel()
             await asyncio.gather(*critic_tasks, return_exceptions=True)
+            tracer.finish_root(error="Council meeting cancelled during critic phase.", usage=total_tokens)
+            tracer.finalize()
             raise
 
         critic_data = aggregate_critic_reviews(collected_reviews, responses)
@@ -443,22 +495,39 @@ class CouncilWorkflow:
         architect_model, architect_stream = self._phase_stream(
             client, architect_prompt, ArchitectBlueprint, "architect", request.custom_model_map,
         )
+        architect_trace = tracer.start_llm(
+            "Blueprint Architect",
+            {"query": request.query, "prompt": architect_prompt, "finalists": finalist_responses, "critic_data": critic_data},
+            metadata={"stage": "architect", "model": architect_model, "reasoning_effort": "medium"},
+        )
         yield {"type": "architect_start", "model": architect_model}
         started_at = time.perf_counter()
         architect_chunks: list[str] = []
         architect_usage: UsageDict = {"prompt": 0, "completion": 0, "total": 0}
         architect_model_used = architect_model
-        async for update in architect_stream:
-            if getattr(update, "model", None):
-                architect_model_used = update.model
-            reasoning = getattr(update, "reasoning", "")
-            if reasoning:
-                yield {"type": "architect_thinking", "chunk": reasoning}
-            if update.delta:
-                architect_chunks.append(update.delta)
-                yield {"type": "architect_chunk", "chunk": update.delta}
-            if update.usage is not None:
-                architect_usage = update.usage
+        try:
+            async for update in architect_stream:
+                if getattr(update, "model", None):
+                    architect_model_used = update.model
+                reasoning = getattr(update, "reasoning", "")
+                if reasoning:
+                    yield {"type": "architect_thinking", "chunk": reasoning}
+                if update.delta:
+                    architect_trace.mark_first_delta()
+                    architect_chunks.append(update.delta)
+                    yield {"type": "architect_chunk", "chunk": update.delta}
+                if update.usage is not None:
+                    architect_usage = update.usage
+        except asyncio.CancelledError:
+            architect_trace.finish(outputs={"visible_output": "".join(architect_chunks)}, usage=architect_usage, error="Architect cancelled")
+            tracer.finish_root(error="Council meeting cancelled during architect phase.", usage=total_tokens)
+            tracer.finalize()
+            raise
+        except Exception as exc:
+            architect_trace.finish(outputs={"visible_output": "".join(architect_chunks)}, usage=architect_usage, error=exc)
+            tracer.finish_root(error=exc, usage=total_tokens)
+            tracer.finalize()
+            raise
         yield {"type": "architect_thinking_done"}
         architect_raw = "".join(architect_chunks)
         architect_duration = time.perf_counter() - started_at
@@ -468,6 +537,7 @@ class CouncilWorkflow:
         try:
             architect_data = json.loads(architect_raw)
         except json.JSONDecodeError:
+            architect_trace.finish(outputs={"visible_output": architect_raw}, usage=architect_usage, error="Architect returned invalid JSON")
             yield {
                 "type": "error",
                 "message": "Architect returned invalid JSON. Using a safe fallback blueprint.",
@@ -476,6 +546,8 @@ class CouncilWorkflow:
             }
             architect_data = fallback_architect_blueprint()
             architect_raw = json.dumps(architect_data)
+        else:
+            architect_trace.finish(outputs={"visible_output": architect_raw}, usage=architect_usage)
 
         architect_data["time_taken"] = architect_duration
         architect_data["model"] = architect_model_used
@@ -490,26 +562,44 @@ class CouncilWorkflow:
         finalizer_model, finalizer_stream = self._phase_stream(
             client, finalizer_prompt, None, "finalizer", request.custom_model_map,
         )
+        finalizer_trace = tracer.start_llm(
+            "Final Synthesis",
+            {"query": request.query, "prompt": finalizer_prompt, "blueprint": architect_raw, "finalists": finalist_responses},
+            metadata={"stage": "finalizer", "model": finalizer_model, "reasoning_effort": "low"},
+        )
         yield {"type": "finalizer_start", "model": finalizer_model}
         started_at = time.perf_counter()
         final_chunks: list[str] = []
         final_usage: UsageDict = {"prompt": 0, "completion": 0, "total": 0}
         finalizer_model_used = finalizer_model
-        async for update in finalizer_stream:
-            if getattr(update, "model", None):
-                finalizer_model_used = update.model
-            reasoning = getattr(update, "reasoning", "")
-            if reasoning:
-                yield {"type": "finalizer_thinking", "chunk": reasoning}
-            if update.delta:
-                final_chunks.append(update.delta)
-                yield {"type": "finalizer_chunk", "chunk": update.delta}
-            if update.usage is not None:
-                final_usage = update.usage
+        try:
+            async for update in finalizer_stream:
+                if getattr(update, "model", None):
+                    finalizer_model_used = update.model
+                reasoning = getattr(update, "reasoning", "")
+                if reasoning:
+                    yield {"type": "finalizer_thinking", "chunk": reasoning}
+                if update.delta:
+                    finalizer_trace.mark_first_delta()
+                    final_chunks.append(update.delta)
+                    yield {"type": "finalizer_chunk", "chunk": update.delta}
+                if update.usage is not None:
+                    final_usage = update.usage
+        except asyncio.CancelledError:
+            finalizer_trace.finish(outputs={"visible_output": "".join(final_chunks)}, usage=final_usage, error="Finalizer cancelled")
+            tracer.finish_root(error="Council meeting cancelled during finalizer phase.", usage=total_tokens)
+            tracer.finalize()
+            raise
+        except Exception as exc:
+            finalizer_trace.finish(outputs={"visible_output": "".join(final_chunks)}, usage=final_usage, error=exc)
+            tracer.finish_root(error=exc, usage=total_tokens)
+            tracer.finalize()
+            raise
         yield {"type": "finalizer_thinking_done"}
         final_output = "".join(final_chunks)
         final_duration = time.perf_counter() - started_at
         add_usage(final_usage)
+        finalizer_trace.finish(outputs={"visible_output": final_output}, usage=final_usage)
         tracer.log_step("Finalizer", "Finalizer-Writer", finalizer_prompt, final_output)
 
         yield {
@@ -519,6 +609,11 @@ class CouncilWorkflow:
             "usage": final_usage,
         }
 
+        tracer.finish_root(
+            outputs={"final_report": final_output, "finalists": finalists, "critic_data": critic_data},
+            usage=total_tokens,
+            metadata={"total_execution_time_seconds": round(time.perf_counter() - workflow_start, 4)},
+        )
         tracer.finalize()
         yield {
             "type": "done",

@@ -12,7 +12,14 @@ export function PhaseCritic() {
   const [activeTab, setActiveTab] = useState('Overview');
 
   if (!criticData) {
-    return null;
+    if (!currentSession?.criticProgress) return null;
+    return (
+      <div className="rounded-2xl border border-indigo-500/25 bg-indigo-500/5 p-6">
+        <p className="text-xs font-bold uppercase tracking-[0.2em] text-indigo-400">Peer review in progress</p>
+        <p className="mt-3 text-sm text-[var(--text-muted)]">The critic is reviewing batch {currentSession.criticProgress.batch} of {currentSession.criticProgress.totalBatches}. Structured findings will appear once validated.</p>
+        <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-[var(--border-base)]"><div className="h-full w-2/3 animate-pulse rounded-full bg-indigo-500" /></div>
+      </div>
+    );
   }
 
   const { winner_id, reasoning, scores, flaws } = criticData;
@@ -94,29 +101,13 @@ export function PhaseCritic() {
               </div>
             </div>
 
-            {currentSession?.metrics?.critic && (
-              <div className="flex items-center justify-end gap-4 border-t border-dashed border-[var(--border-base)] pt-3 font-mono text-[10px] uppercase text-[var(--text-muted)] opacity-80">
-                <div className="flex items-center gap-1.5" title="Execution Time">
-                  <Clock className="h-3 w-3" />
-                  <span>{currentSession.metrics.critic.time.toFixed(2)}s</span>
-                </div>
-                <div className="flex items-center gap-1.5" title="Total Tokens">
-                  <Hash className="h-3 w-3" />
-                  <span>{currentSession.metrics.critic.usage?.total || 0} Tok</span>
-                </div>
-                <div className="flex items-center gap-1.5" title="Model ID">
-                  <Cpu className="h-3 w-3" />
-                  <span>{currentSession.metrics.critic.model.split('/').pop()}</span>
-                </div>
-              </div>
-            )}
           </div>
         ) : (
           <div className="animate-in fade-in slide-in-from-left-4 duration-300">
             <div className="rounded-lg border border-[var(--border-base)] bg-[var(--bg-panel)] p-6">
-              <h3 className="mb-6 flex items-center gap-2 text-xs font-bold uppercase text-red-500">
-                <AlertTriangle className="h-4 w-4" />
-                Critique Analysis: {activeTab}
+              <h3 className="mb-6 flex items-center justify-between gap-2 text-xs font-bold uppercase text-red-500">
+                <span className="flex items-center gap-2"><AlertTriangle className="h-4 w-4" />Critique Analysis: {activeTab}</span>
+                <span className="font-mono text-[var(--text-muted)]">{scores[activeTab] ?? 0}/10</span>
               </h3>
 
               <ul className="space-y-3">
@@ -133,7 +124,7 @@ export function PhaseCritic() {
                   const flawList = Array.isArray(currentFlaws) ? currentFlaws : [currentFlaws];
 
                   return flawList.map((flaw, index) => (
-                    <li key={index} className="flex gap-3 text-sm text-[var(--text-main)]">
+                    <li key={index} className="flex gap-3 break-words text-sm text-[var(--text-main)]">
                       <span className="mt-2 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-red-400" />
                       <span className="leading-relaxed">{flaw}</span>
                     </li>
@@ -144,6 +135,16 @@ export function PhaseCritic() {
           </div>
         )}
       </div>
+
+      {currentSession?.metrics?.critic && (
+        <div className="flex flex-wrap items-center justify-end gap-4 border-t border-dashed border-[var(--border-base)] pt-3 font-mono text-[10px] uppercase text-[var(--text-muted)] opacity-80">
+          <div className="flex items-center gap-1.5" title="Execution Time"><Clock className="h-3 w-3" /><span>{currentSession.metrics.critic.time.toFixed(2)}s</span></div>
+          <div className="flex items-center gap-1.5" title="Input Tokens"><Hash className="h-3 w-3" /><span>In {currentSession.metrics.critic.usage?.prompt || 0}</span></div>
+          <div className="flex items-center gap-1.5" title="Output Tokens"><Hash className="h-3 w-3" /><span>Out {currentSession.metrics.critic.usage?.completion || 0}</span></div>
+          <div className="flex items-center gap-1.5" title="Total Tokens"><Hash className="h-3 w-3" /><span>Total {currentSession.metrics.critic.usage?.total || 0}</span></div>
+          <div className="flex items-center gap-1.5" title="Model ID"><Cpu className="h-3 w-3" /><span>{currentSession.metrics.critic.model.split('/').pop()}</span></div>
+        </div>
+      )}
     </div>
   );
 }

@@ -10,7 +10,14 @@ export function PhaseArchitect() {
   const architectData = currentSession?.architectData;
 
   if (!architectData) {
-    return null;
+    if (!currentSession?.architectModel) return null;
+    return (
+      <div className="rounded-[24px] border border-indigo-500/25 bg-indigo-500/5 p-6">
+        <p className="text-xs font-bold uppercase tracking-[0.2em] text-indigo-400">Blueprint in progress</p>
+        <p className="mt-3 text-sm text-[var(--text-muted)]">The architect is assembling a validated response blueprint.</p>
+        <div className="mt-4 h-1.5 w-2/3 animate-pulse rounded-full bg-indigo-500" />
+      </div>
+    );
   }
 
   const { structure, missing_facts_to_add, tone_guidelines } = architectData;
@@ -76,9 +83,17 @@ export function PhaseArchitect() {
             <Clock className="h-3 w-3" />
             <span>{currentSession.metrics.architect.time.toFixed(2)}s</span>
           </div>
+          <div className="flex items-center gap-1.5" title="Input Tokens">
+            <Hash className="h-3 w-3" />
+            <span>In {currentSession.metrics.architect.usage?.prompt || 0}</span>
+          </div>
+          <div className="flex items-center gap-1.5" title="Output Tokens">
+            <Hash className="h-3 w-3" />
+            <span>Out {currentSession.metrics.architect.usage?.completion || 0}</span>
+          </div>
           <div className="flex items-center gap-1.5" title="Total Tokens">
             <Hash className="h-3 w-3" />
-            <span>{currentSession.metrics.architect.usage?.total || 0} Tok</span>
+            <span>Total {currentSession.metrics.architect.usage?.total || 0}</span>
           </div>
           <div className="flex items-center gap-1.5" title="Model ID">
             <Cpu className="h-3 w-3" />

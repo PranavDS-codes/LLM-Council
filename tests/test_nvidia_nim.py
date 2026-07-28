@@ -51,6 +51,35 @@ class NvidiaNimTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.await_args.kwargs["model"], "openai/gpt-oss-20b")
         self.assertNotIn("extra_headers", request.await_args.kwargs)
 
+    async def test_stream_generate_preserves_deltas_and_terminal_usage(self):
+        client = LLMClient(api_key="nvapi-test-key", settings=get_settings())
+
+        async def chunks():
+            yield types.SimpleNamespace(
+                choices=[types.SimpleNamespace(delta=types.SimpleNamespace(content="Hello "))],
+                usage=None,
+            )
+            yield types.SimpleNamespace(
+                choices=[types.SimpleNamespace(delta=types.SimpleNamespace(content="world"))],
+                usage=None,
+            )
+            yield types.SimpleNamespace(
+                choices=[],
+                usage=types.SimpleNamespace(prompt_tokens=12, completion_tokens=4, total_tokens=16),
+            )
+
+        request = AsyncMock(return_value=chunks())
+        client.openai_client = types.SimpleNamespace(
+            chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=request)),
+        )
+
+        updates = [update async for update in client.stream_generate("Hello", model="openai/gpt-oss-20b")]
+
+        self.assertEqual("".join(update.delta for update in updates), "Hello world")
+        self.assertEqual(updates[-1].usage, {"prompt": 12, "completion": 4, "total": 16})
+        self.assertTrue(request.await_args.kwargs["stream"])
+        self.assertNotIn("extra_headers", request.await_args.kwargs)
+
 
 if __name__ == "__main__":
     unittest.main()

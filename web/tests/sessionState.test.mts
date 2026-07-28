@@ -54,3 +54,20 @@ test('stopSessionState marks a session as stopped and preserves an issue', () =>
   assert.equal(session.status, 'stopped');
   assert.equal(session.issues.at(-1)?.message, 'Session stopped by user.');
 });
+
+test('live phase buffers preserve generator tabs and structured progress', () => {
+  let session = createSession('3', 'Stream this', agents);
+  session = applyCouncilEvent(session, { type: 'generator_chunk', agent: 'The Academic', chunk: 'Academic ' });
+  session = applyCouncilEvent(session, { type: 'generator_chunk', agent: 'The Skeptic', chunk: 'Skeptic ' });
+  session = applyCouncilEvent(session, { type: 'generator_chunk', agent: 'The Academic', chunk: 'draft' });
+  session = applyCouncilEvent(session, { type: 'critic_start', model: 'openai/gpt-oss-120b', batch: 1, total_batches: 2 });
+  session = applyCouncilEvent(session, { type: 'critic_chunk', chunk: '{"scores":' });
+  session = applyCouncilEvent(session, { type: 'architect_start', model: 'openai/gpt-oss-120b' });
+  session = applyCouncilEvent(session, { type: 'architect_chunk', chunk: '{"structure":' });
+
+  assert.equal(session.generatorStreams['The Academic'], 'Academic draft');
+  assert.equal(session.generatorStreams['The Skeptic'], 'Skeptic ');
+  assert.equal(session.criticProgress?.totalBatches, 2);
+  assert.equal(session.criticStream, '{"scores":');
+  assert.equal(session.architectStream, '{"structure":');
+});

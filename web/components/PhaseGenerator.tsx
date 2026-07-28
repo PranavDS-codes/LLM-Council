@@ -24,6 +24,7 @@ export function PhaseGenerator() {
   const currentTab = selectedTab || activeAgentNames[0] || '';
   const agentIssues =
     currentSession?.issues.filter((issue) => issue.agent === currentTab) || [];
+  const currentMetric = currentTab ? currentSession?.metrics.generators[currentTab] : undefined;
 
   if (activeAgentNames.length === 0) {
     return null;
@@ -101,19 +102,27 @@ export function PhaseGenerator() {
           </div>
         )}
 
-        {isExpanded && <span className="ml-1 inline-block h-4 w-2 animate-pulse bg-cyan-500 align-middle" />}
+        {isExpanded && !currentMetric && <span className="ml-1 inline-block h-4 w-2 animate-pulse bg-cyan-500 align-middle" />}
 
         {currentTab && generatorStreams[currentTab] && (
           <div className="mt-6 flex items-center justify-end gap-4 border-t border-dashed border-[var(--border-base)] pt-3 font-mono text-[10px] uppercase text-[var(--text-muted)] opacity-80">
-            {currentSession?.metrics?.generators?.[currentTab] && (
+            {currentMetric && (
               <>
                 <div className="flex items-center gap-1.5" title="Execution Time">
                   <Clock className="h-3 w-3" />
-                  <span>{currentSession.metrics.generators[currentTab].time.toFixed(2)}s</span>
+                  <span>{currentMetric.time.toFixed(2)}s</span>
+                </div>
+                <div className="flex items-center gap-1.5" title="Input Tokens">
+                  <Hash className="h-3 w-3" />
+                  <span>In {currentMetric.usage?.prompt || 0}</span>
+                </div>
+                <div className="flex items-center gap-1.5" title="Output Tokens">
+                  <Hash className="h-3 w-3" />
+                  <span>Out {currentMetric.usage?.completion || 0}</span>
                 </div>
                 <div className="flex items-center gap-1.5" title="Total Tokens">
                   <Hash className="h-3 w-3" />
-                  <span>{currentSession.metrics.generators[currentTab].usage?.total || 0} Tok</span>
+                  <span>Total {currentMetric.usage?.total || 0}</span>
                 </div>
               </>
             )}

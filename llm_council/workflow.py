@@ -122,8 +122,9 @@ class CouncilWorkflow:
             f"Workflow started. Agents: {active_agents}. Mock mode: {self.settings.use_mock_mode}",
         )
 
-        responses: list[dict[str, str]] = []
-        generator_tasks: list[tuple[str, asyncio.Task[tuple[str, UsageDict]], str, float]] = []
+        responses_by_agent: dict[str, str] = {}
+        generator_tasks: list[asyncio.Task[None]] = []
+        generator_queue: asyncio.Queue[tuple[str, str, Any]] = asyncio.Queue()
 
         for index, agent_name in enumerate(active_agents):
             persona_desc = PERSONA[agent_name]["description"]
@@ -135,26 +136,50 @@ class CouncilWorkflow:
             model_id = self._model_for(f"generator_{index + 1}", DEFAULT_MODEL_MAP["generator_1"], request.custom_model_map)
             yield {"type": "generator_start", "agent": agent_name, "model": model_id}
             started_at = time.perf_counter()
-            task = asyncio.create_task(client.generate(prompt, model=model_id))
-            generator_tasks.append((agent_name, task, model_id, started_at))
+            async def pump_generator(
+                name: str = agent_name,
+                model: str = model_id,
+                started: float = started_at,
+                generator_prompt: str = prompt,
+            ) -> None:
+                content = ""
+                usage: UsageDict = {"prompt": 0, "completion": 0, "total": 0}
+                try:
+                    async for update in client.stream_generate(
+                        generator_prompt,
+                        model=model,
+                        max_tokens=700,
+                    ):
+                        if update.delta:
+                            content += update.delta
+                            await generator_queue.put(("chunk", name, update.delta))
+                        if update.usage is not None:
+                            usage = update.usage
+                    await generator_queue.put(("done", name, (content, usage, model, started)))
+                except Exception as exc:  # pragma: no cover - defensive async boundary
+                    await generator_queue.put(("error", name, exc))
+
+            generator_tasks.append(asyncio.create_task(pump_generator()))
 
         try:
-            for agent_name, task, model_id, started_at in generator_tasks:
-                try:
-                    response_content, usage = await task
+            unfinished = len(generator_tasks)
+            while unfinished:
+                event_type, agent_name, payload = await generator_queue.get()
+                if event_type == "chunk":
+                    yield {"type": "generator_chunk", "agent": agent_name, "chunk": payload}
+                elif event_type == "done":
+                    response_content, usage, model_id, started_at = payload
                     duration = time.perf_counter() - started_at
                     add_usage(usage)
+                    responses_by_agent[agent_name] = response_content
                     tracer.log_step("Generators", f"Generator-{agent_name}", request.query, response_content)
-                    responses.append({"persona": agent_name, "content": response_content})
-                    yield {"type": "generator_chunk", "agent": agent_name, "chunk": response_content}
                     yield {
-                        "type": "generator_done",
-                        "agent": agent_name,
-                        "time_taken": duration,
-                        "model": model_id,
-                        "usage": usage,
+                        "type": "generator_done", "agent": agent_name, "time_taken": duration,
+                        "model": model_id, "usage": usage,
                     }
-                except Exception as exc:  # pragma: no cover - defensive async boundary
+                    unfinished -= 1
+                else:
+                    exc = payload
                     yield {
                         "type": "error",
                         "message": f"Agent {agent_name} failed: {exc}",
@@ -162,10 +187,18 @@ class CouncilWorkflow:
                         "agent": agent_name,
                         "recoverable": True,
                     }
+                    unfinished -= 1
         except asyncio.CancelledError:
-            for _, task, _, _ in generator_tasks:
+            for task in generator_tasks:
                 task.cancel()
+            await asyncio.gather(*generator_tasks, return_exceptions=True)
             raise
+
+        responses = [
+            {"persona": agent_name, "content": responses_by_agent[agent_name]}
+            for agent_name in active_agents
+            if agent_name in responses_by_agent
+        ]
 
         if not responses:
             yield {
@@ -186,40 +219,49 @@ class CouncilWorkflow:
         best_response_content = responses[0]["content"]
 
         if len(active_agents) > 1:
-            for batch_index, batch in enumerate(self._chunk_responses(responses, size=3), start=1):
-                formatted_text = self._format_responses_for_critic(batch)
-                prompt = self.prompts.critic.format(query=request.query, formatted_responses=formatted_text)
-                critic_model = self._model_for("critic", DEFAULT_MODEL_MAP["critic"], request.custom_model_map)
+            # A single critic sees every draft, so it can select one council-wide winner.
+            formatted_text = self._format_responses_for_critic(responses)
+            prompt = self.prompts.critic.format(query=request.query, formatted_responses=formatted_text)
+            critic_model = self._model_for("critic", DEFAULT_MODEL_MAP["critic"], request.custom_model_map)
 
-                started_at = time.perf_counter()
-                critic_json_str, usage = await client.generate(prompt, schema=CriticOutput, model=critic_model)
-                duration = time.perf_counter() - started_at
-                add_usage(usage)
-                tracer.log_step("Critics", f"Critic-Batch-{batch_index}", prompt, critic_json_str)
+            yield {"type": "critic_start", "model": critic_model, "batch": 1, "total_batches": 1}
+            started_at = time.perf_counter()
+            critic_chunks: list[str] = []
+            usage: UsageDict = {"prompt": 0, "completion": 0, "total": 0}
+            async for update in client.stream_generate(prompt, schema=CriticOutput, model=critic_model):
+                if update.delta:
+                    critic_chunks.append(update.delta)
+                    yield {"type": "critic_chunk", "chunk": update.delta}
+                if update.usage is not None:
+                    usage = update.usage
+            critic_json_str = "".join(critic_chunks)
+            duration = time.perf_counter() - started_at
+            add_usage(usage)
+            tracer.log_step("Critics", "Critic-All-Responses", prompt, critic_json_str)
 
-                try:
-                    critic_data = json.loads(critic_json_str)
-                except json.JSONDecodeError:
-                    yield {
-                        "type": "error",
-                        "message": "Critic returned invalid JSON. Falling back to the first response in the batch.",
-                        "phase": "critic",
-                        "recoverable": True,
-                    }
-                    best_response_content = batch[0]["content"]
-                    continue
-
+            try:
+                critic_data = json.loads(critic_json_str)
+            except json.JSONDecodeError:
+                yield {
+                    "type": "error",
+                    "message": "Critic returned invalid JSON. Falling back to the first response.",
+                    "phase": "critic",
+                    "recoverable": True,
+                }
+            else:
                 critic_data["time_taken"] = duration
                 critic_data["model"] = critic_model
                 critic_data["usage"] = usage
                 critique_results.append(critic_data)
-                best_response_content = self._winner_content(batch, critic_data.get("winner_id", ""))
+                best_response_content = self._winner_content(responses, critic_data.get("winner_id", ""))
                 yield {"type": "critic_result", **critic_data}
+            yield {"type": "critic_done"}
         else:
             auto_win = build_auto_win(active_agents[0])
             critique_results.append(auto_win)
             tracer.log_step("Critics", "Auto-Critic", "Single Agent", json.dumps(auto_win))
             yield {"type": "critic_result", **auto_win}
+            yield {"type": "critic_done"}
 
         architect_prompt = self.prompts.architect.format(
             query=request.query,
@@ -227,12 +269,17 @@ class CouncilWorkflow:
             critiques=json.dumps(critique_results) if critique_results else "[]",
         )
         architect_model = self._model_for("architect", DEFAULT_MODEL_MAP["architect"], request.custom_model_map)
+        yield {"type": "architect_start", "model": architect_model}
         started_at = time.perf_counter()
-        architect_raw, architect_usage = await client.generate(
-            architect_prompt,
-            schema=ArchitectBlueprint,
-            model=architect_model,
-        )
+        architect_chunks: list[str] = []
+        architect_usage: UsageDict = {"prompt": 0, "completion": 0, "total": 0}
+        async for update in client.stream_generate(architect_prompt, schema=ArchitectBlueprint, model=architect_model):
+            if update.delta:
+                architect_chunks.append(update.delta)
+                yield {"type": "architect_chunk", "chunk": update.delta}
+            if update.usage is not None:
+                architect_usage = update.usage
+        architect_raw = "".join(architect_chunks)
         architect_duration = time.perf_counter() - started_at
         add_usage(architect_usage)
         tracer.log_step("Architect", "Architect-Planner", architect_prompt, architect_raw)
@@ -260,14 +307,20 @@ class CouncilWorkflow:
             context=best_response_content,
         )
         finalizer_model = self._model_for("finalizer", DEFAULT_MODEL_MAP["finalizer"], request.custom_model_map)
+        yield {"type": "finalizer_start", "model": finalizer_model}
         started_at = time.perf_counter()
-        final_output, final_usage = await client.generate(finalizer_prompt, model=finalizer_model)
+        final_chunks: list[str] = []
+        final_usage: UsageDict = {"prompt": 0, "completion": 0, "total": 0}
+        async for update in client.stream_generate(finalizer_prompt, model=finalizer_model):
+            if update.delta:
+                final_chunks.append(update.delta)
+                yield {"type": "finalizer_chunk", "chunk": update.delta}
+            if update.usage is not None:
+                final_usage = update.usage
+        final_output = "".join(final_chunks)
         final_duration = time.perf_counter() - started_at
         add_usage(final_usage)
         tracer.log_step("Finalizer", "Finalizer-Writer", finalizer_prompt, final_output)
-
-        for index in range(0, len(final_output), 120):
-            yield {"type": "finalizer_chunk", "chunk": final_output[index:index + 120]}
 
         yield {
             "type": "finalizer_done",

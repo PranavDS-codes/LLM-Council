@@ -189,8 +189,15 @@ function sanitizeSession(value: unknown): CouncilSession | null {
     status: sanitizeStatus(value.status),
     generatorStreams: sanitizeStringRecord(value.generatorStreams),
     agentModels: sanitizeStringRecord(value.agentModels),
+    criticStream: typeof value.criticStream === 'string' ? value.criticStream : '',
+    criticProgress: isRecord(value.criticProgress) && typeof value.criticProgress.model === 'string'
+      ? { batch: Number(value.criticProgress.batch || 1), totalBatches: Number(value.criticProgress.totalBatches || 1), model: value.criticProgress.model }
+      : null,
     criticData,
+    architectStream: typeof value.architectStream === 'string' ? value.architectStream : '',
+    architectModel: typeof value.architectModel === 'string' ? value.architectModel : null,
     architectData,
+    finalizerModel: typeof value.finalizerModel === 'string' ? value.finalizerModel : null,
     finalizerText,
     issues: sanitizeIssues(value.issues),
     metrics: sanitizeMetrics(value.metrics),

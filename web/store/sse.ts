@@ -1,10 +1,13 @@
 import type {
   ArchitectResultEvent,
+  ArchitectStartEvent,
   CouncilEvent,
+  CriticStartEvent,
   CriticResultEvent,
   DoneEvent,
   ErrorEvent,
   FinalizerDoneEvent,
+  FinalizerStartEvent,
   GeneratorDoneEvent,
   GeneratorStartEvent,
   MetricUsage,
@@ -73,6 +76,18 @@ function normalizeEvent(type: string, payload: Record<string, unknown>): Council
         usage: toUsage(payload.usage),
       } satisfies CriticResultEvent;
 
+    case 'critic_start':
+      if (typeof payload.model === 'string') {
+        return { type, model: payload.model, batch: Number(payload.batch || 1), total_batches: Number(payload.total_batches || 1) } satisfies CriticStartEvent;
+      }
+      return null;
+
+    case 'critic_chunk':
+      return typeof payload.chunk === 'string' ? { type, chunk: payload.chunk } : null;
+
+    case 'critic_done':
+      return { type };
+
     case 'architect_result':
       return {
         type,
@@ -88,6 +103,15 @@ function normalizeEvent(type: string, payload: Record<string, unknown>): Council
         model: typeof payload.model === 'string' ? payload.model : 'N/A',
         usage: toUsage(payload.usage),
       } satisfies ArchitectResultEvent;
+
+    case 'architect_start':
+      return typeof payload.model === 'string' ? { type, model: payload.model } satisfies ArchitectStartEvent : null;
+
+    case 'architect_chunk':
+      return typeof payload.chunk === 'string' ? { type, chunk: payload.chunk } : null;
+
+    case 'finalizer_start':
+      return typeof payload.model === 'string' ? { type, model: payload.model } satisfies FinalizerStartEvent : null;
 
     case 'finalizer_chunk':
       if (typeof payload.chunk === 'string') {
@@ -176,4 +200,3 @@ export function parseSseChunk(buffer: string, chunk: string): ParsedSseResult {
     events,
   };
 }
-

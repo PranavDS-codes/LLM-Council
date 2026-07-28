@@ -20,3 +20,8 @@ test('parseSseChunk converts malformed payloads into recoverable errors', () => 
   assert.equal(parsed.events.length, 1);
   assert.equal(parsed.events[0].type, 'error');
 });
+
+test('parseSseChunk accepts structured phase progress events', () => {
+  const parsed = parseSseChunk('', 'event: critic_start\ndata: {"type":"critic_start","model":"openai/gpt-oss-120b","batch":1,"total_batches":2}\n\nevent: architect_chunk\ndata: {"type":"architect_chunk","chunk":"partial"}\n\n');
+  assert.deepEqual(parsed.events.map((event) => event.type), ['critic_start', 'architect_chunk']);
+});

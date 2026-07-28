@@ -28,8 +28,13 @@ export function createSession(id: string, query: string, agents: Agent[]): Counc
     status: 'streaming',
     generatorStreams: {},
     agentModels: {},
+    criticStream: '',
+    criticProgress: null,
     criticData: null,
+    architectStream: '',
+    architectModel: null,
     architectData: null,
+    finalizerModel: null,
     finalizerText: '',
     issues: [],
     metrics: {
@@ -208,6 +213,24 @@ export function applyCouncilEvent(session: CouncilSession, event: CouncilEvent):
       return withMetric;
     }
 
+    case 'critic_start': {
+      const nextSession: CouncilSession = {
+        ...session,
+        activePhase: Math.max(session.activePhase, 2) as CouncilSession['activePhase'],
+        status: 'streaming',
+        criticStream: '',
+        criticProgress: { batch: event.batch, totalBatches: event.total_batches, model: event.model },
+      };
+      nextSession.summary = getSessionSummary(nextSession);
+      return nextSession;
+    }
+
+    case 'critic_chunk':
+      return { ...session, criticStream: `${session.criticStream}${event.chunk}` };
+
+    case 'critic_done':
+      return { ...session, criticProgress: null };
+
     case 'architect_result': {
       const withMetric = updatePhaseMetric(
         {
@@ -221,6 +244,32 @@ export function applyCouncilEvent(session: CouncilSession, event: CouncilEvent):
       );
       withMetric.summary = getSessionSummary(withMetric);
       return withMetric;
+    }
+
+    case 'architect_start': {
+      const nextSession: CouncilSession = {
+        ...session,
+        activePhase: Math.max(session.activePhase, 3) as CouncilSession['activePhase'],
+        status: 'streaming',
+        architectStream: '',
+        architectModel: event.model,
+      };
+      nextSession.summary = getSessionSummary(nextSession);
+      return nextSession;
+    }
+
+    case 'architect_chunk':
+      return { ...session, architectStream: `${session.architectStream}${event.chunk}` };
+
+    case 'finalizer_start': {
+      const nextSession: CouncilSession = {
+        ...session,
+        activePhase: 4,
+        status: 'streaming',
+        finalizerModel: event.model,
+      };
+      nextSession.summary = getSessionSummary(nextSession);
+      return nextSession;
     }
 
     case 'finalizer_chunk': {

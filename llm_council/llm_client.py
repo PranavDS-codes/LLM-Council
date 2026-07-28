@@ -1,11 +1,22 @@
 import asyncio
 import json
 import random
-from typing import Optional, Any
+from dataclasses import dataclass
+from typing import AsyncIterator, Optional, Any
 
 from openai import AsyncOpenAI, APIStatusError
 
 from .settings import DEFAULT_MODEL_MAP, Settings, get_settings
+
+UsageDict = dict[str, int]
+
+
+@dataclass(frozen=True)
+class StreamUpdate:
+    """One upstream token delta or the terminal usage record for a request."""
+
+    delta: str = ""
+    usage: UsageDict | None = None
 
 class LLMClient:
     def __init__(self, api_key: Optional[str] = None, settings: Optional[Settings] = None):
@@ -20,7 +31,7 @@ class LLMClient:
             base_url=self.settings.nvidia_api_base_url,
         ) if not self.mock_mode else None
         
-    async def generate(self, prompt: str, schema: Optional[Any] = None, model: Optional[str] = None):
+    async def generate(self, prompt: str, schema: Optional[Any] = None, model: Optional[str] = None, max_tokens: Optional[int] = None):
         """
         Generates a response from the LLM. 
         Returns (content, usage_dict).
@@ -28,7 +39,80 @@ class LLMClient:
         if self.mock_mode:
             return await self._mock_generate(prompt, schema)
         
-        return await self._real_generate(prompt, schema, model)
+        return await self._real_generate(prompt, schema, model, max_tokens)
+
+    async def stream_generate(
+        self,
+        prompt: str,
+        schema: Optional[Any] = None,
+        model: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+    ) -> AsyncIterator[StreamUpdate]:
+        """Yield true NVIDIA NIM deltas followed by terminal token usage."""
+        if self.mock_mode:
+            content, usage = await self._mock_generate(prompt, schema)
+            for index in range(0, len(content), 48):
+                await asyncio.sleep(0)
+                yield StreamUpdate(delta=content[index:index + 48])
+            yield StreamUpdate(usage=usage)
+            return
+
+        target_model = model if model else DEFAULT_MODEL_MAP["generator_1"]
+        kwargs: dict[str, Any] = {
+            "model": target_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+        if schema:
+            kwargs["response_format"] = {"type": "json_object"}
+
+        for attempt in range(4):
+            emitted_content = False
+            try:
+                print("\n[DEBUG] Starting NVIDIA NIM stream:")
+                print(f"Model: {target_model}")
+                stream = await self.openai_client.chat.completions.create(**kwargs)
+                terminal_usage: UsageDict | None = None
+                async for chunk in stream:
+                    if chunk.usage:
+                        terminal_usage = {
+                            "prompt": chunk.usage.prompt_tokens or 0,
+                            "completion": chunk.usage.completion_tokens or 0,
+                            "total": chunk.usage.total_tokens or 0,
+                        }
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta.content or ""
+                    if delta:
+                        emitted_content = True
+                        yield StreamUpdate(delta=delta)
+                yield StreamUpdate(usage=terminal_usage or {"prompt": 0, "completion": 0, "total": 0})
+                return
+            except APIStatusError as exc:
+                print(f"[ERROR] NVIDIA NIM stream status error: {exc.status_code} - {exc}")
+                if exc.status_code == 422 and not emitted_content:
+                    if "response_format" in kwargs:
+                        print("[WARNING] Retrying NVIDIA NIM stream without response_format.")
+                        del kwargs["response_format"]
+                        continue
+                    if "stream_options" in kwargs:
+                        # Some OpenAI-compatible NIM deployments omit usage support.
+                        del kwargs["stream_options"]
+                        continue
+                retryable = exc.status_code in [429, 500, 502, 503, 504]
+                if emitted_content or not retryable or attempt == 3:
+                    raise RuntimeError(f"NVIDIA NIM stream failed: {exc}") from exc
+            except Exception as exc:
+                retryable = any(code in str(exc) for code in ("429", "500", "502", "503", "504"))
+                if emitted_content or not retryable or attempt == 3:
+                    raise RuntimeError(f"NVIDIA NIM stream failed: {exc}") from exc
+
+            delay = 2 * (2 ** attempt) + (random.random() * 0.5)
+            print(f"[WARNING] NVIDIA NIM stream retrying in {delay:.2f}s.")
+            await asyncio.sleep(delay)
 
     async def _mock_generate(self, prompt: str, schema: Optional[Any] = None):
         await asyncio.sleep(0.5)
@@ -55,7 +139,7 @@ class LLMClient:
         else:
             return f"Mock Response to: {prompt[:50]}...", usage
 
-    async def _real_generate(self, prompt: str, schema: Optional[Any] = None, model: Optional[str] = None):
+    async def _real_generate(self, prompt: str, schema: Optional[Any] = None, model: Optional[str] = None, max_tokens: Optional[int] = None):
         target_model = model if model else DEFAULT_MODEL_MAP["generator_1"]
         
         kwargs = {
@@ -65,6 +149,8 @@ class LLMClient:
         
         if schema:
             kwargs["response_format"] = {"type": "json_object"}
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
         
         max_retries = 3
         base_delay = 2

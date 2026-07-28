@@ -68,8 +68,13 @@ export interface CouncilSession {
   status: SessionStatus;
   generatorStreams: Record<string, string>;
   agentModels: Record<string, string>;
+  criticStream: string;
+  criticProgress: { batch: number; totalBatches: number; model: string } | null;
   criticData: CriticData | null;
+  architectStream: string;
+  architectModel: string | null;
   architectData: ArchitectData | null;
+  finalizerModel: string | null;
   finalizerText: string;
   issues: SessionIssue[];
   metrics: CouncilMetrics;
@@ -101,8 +106,39 @@ export interface CriticResultEvent extends CriticData {
   type: 'critic_result';
 }
 
+export interface CriticStartEvent extends BaseCouncilEvent {
+  type: 'critic_start';
+  model: string;
+  batch: number;
+  total_batches: number;
+}
+
+export interface CriticChunkEvent extends BaseCouncilEvent {
+  type: 'critic_chunk';
+  chunk: string;
+}
+
+export interface CriticDoneEvent extends BaseCouncilEvent {
+  type: 'critic_done';
+}
+
 export interface ArchitectResultEvent extends ArchitectData {
   type: 'architect_result';
+}
+
+export interface ArchitectStartEvent extends BaseCouncilEvent {
+  type: 'architect_start';
+  model: string;
+}
+
+export interface ArchitectChunkEvent extends BaseCouncilEvent {
+  type: 'architect_chunk';
+  chunk: string;
+}
+
+export interface FinalizerStartEvent extends BaseCouncilEvent {
+  type: 'finalizer_start';
+  model: string;
 }
 
 export interface FinalizerChunkEvent extends BaseCouncilEvent {
@@ -135,8 +171,14 @@ export type CouncilEvent =
   | GeneratorStartEvent
   | GeneratorChunkEvent
   | GeneratorDoneEvent
+  | CriticStartEvent
+  | CriticChunkEvent
+  | CriticDoneEvent
   | CriticResultEvent
+  | ArchitectStartEvent
+  | ArchitectChunkEvent
   | ArchitectResultEvent
+  | FinalizerStartEvent
   | FinalizerChunkEvent
   | FinalizerDoneEvent
   | DoneEvent
@@ -146,4 +188,3 @@ export interface ValidationState {
   status: 'valid' | 'invalid' | 'loading' | null;
   message?: string;
 }
-

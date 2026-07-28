@@ -21,6 +21,15 @@ class FakeClient:
             raise next_response
         return next_response
 
+    async def stream_generate(self, *args, **kwargs):
+        next_response = await self.generate(*args, **kwargs)
+        content, usage = next_response
+        midpoint = max(1, len(content) // 2)
+        yield type("Update", (), {"delta": content[:midpoint], "usage": None})()
+        await asyncio.sleep(0)
+        yield type("Update", (), {"delta": content[midpoint:], "usage": None})()
+        yield type("Update", (), {"delta": "", "usage": usage})()
+
 
 class WorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def test_select_active_agents_filters_invalid_personas(self):

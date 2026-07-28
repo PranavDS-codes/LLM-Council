@@ -4,6 +4,13 @@ export interface Agent {
   selected: boolean;
 }
 
+export interface AgentRegistryEntry {
+  id: string;
+  name: string;
+  personaInstruction: string;
+  model: string;
+}
+
 export interface MetricUsage {
   total: number;
   prompt: number;

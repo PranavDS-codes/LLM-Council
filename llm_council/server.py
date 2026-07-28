@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from openai import APIStatusError
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 from .llm_client import LLMClient
 from .settings import DEFAULT_MODEL_MAP, PERSONA, get_settings
@@ -27,11 +27,32 @@ app.add_middleware(
 )
 
 
+class AgentDefinitionRequest(BaseModel):
+    id: str = Field(min_length=1, max_length=80)
+    name: str = Field(min_length=1, max_length=60)
+    persona_instruction: str = Field(min_length=1, max_length=4000)
+    model: str = Field(min_length=1, max_length=160)
+
+
 class SummonRequest(BaseModel):
     query: str
     selected_agents: list[str]
     custom_api_key: Optional[str] = None
     custom_model_map: Optional[dict[str, str]] = None
+    agents: Optional[list[AgentDefinitionRequest]] = Field(default=None, max_length=12)
+
+    @model_validator(mode="after")
+    def validate_agent_registry(self) -> "SummonRequest":
+        if not self.agents:
+            return self
+        ids = [agent.id for agent in self.agents]
+        names = [agent.name.casefold() for agent in self.agents]
+        if len(ids) != len(set(ids)) or len(names) != len(set(names)):
+            raise ValueError("Agent IDs and names must be unique")
+        unknown = set(self.selected_agents) - set(ids)
+        if unknown:
+            raise ValueError("Selected agents must exist in the supplied agent registry")
+        return self
 
 
 class CheckModelRequest(BaseModel):
@@ -56,6 +77,7 @@ async def stream_workflow(request: SummonRequest) -> AsyncIterator[str]:
             selected_agents=request.selected_agents,
             custom_api_key=request.custom_api_key,
             custom_model_map=request.custom_model_map,
+            custom_agents=[agent.model_dump() for agent in request.agents] if request.agents else None,
         )
     ):
         event_type = event.get("type", "message")

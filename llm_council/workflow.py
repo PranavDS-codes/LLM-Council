@@ -23,6 +23,7 @@ class WorkflowRequest:
     selected_agents: list[str]
     custom_api_key: str | None = None
     custom_model_map: dict[str, str] | None = None
+    custom_agents: list[dict[str, str]] | None = None
 
 
 def select_active_agents(selected_agents: list[str]) -> list[str]:
@@ -90,7 +91,19 @@ class CouncilWorkflow:
             total_tokens["completion"] += usage.get("completion", 0)
             total_tokens["total"] += usage.get("total", 0)
 
-        active_agents = select_active_agents(request.selected_agents)
+        if request.custom_agents:
+            available_agents = {agent["id"]: agent for agent in request.custom_agents}
+            active_agents = [available_agents[agent_id] for agent_id in request.selected_agents if agent_id in available_agents]
+        else:
+            active_agents = [
+                {
+                    "id": agent_name,
+                    "name": agent_name,
+                    "persona_instruction": PERSONA[agent_name]["description"],
+                    "model": self._model_for(f"generator_{index + 1}", DEFAULT_MODEL_MAP["generator_1"], request.custom_model_map),
+                }
+                for index, agent_name in enumerate(select_active_agents(request.selected_agents))
+            ]
         if not active_agents:
             yield {"type": "error", "message": "No valid agents selected.", "phase": "generator", "recoverable": False}
             yield {"type": "done", "total_execution_time": 0.0, "total_tokens": total_tokens}
@@ -119,21 +132,22 @@ class CouncilWorkflow:
             "Initialization",
             "System",
             request.query,
-            f"Workflow started. Agents: {active_agents}. Mock mode: {self.settings.use_mock_mode}",
+            f"Workflow started. Agents: {[agent['name'] for agent in active_agents]}. Mock mode: {self.settings.use_mock_mode}",
         )
 
         responses_by_agent: dict[str, str] = {}
         generator_tasks: list[asyncio.Task[None]] = []
         generator_queue: asyncio.Queue[tuple[str, str, Any]] = asyncio.Queue()
 
-        for index, agent_name in enumerate(active_agents):
-            persona_desc = PERSONA[agent_name]["description"]
+        for index, agent in enumerate(active_agents):
+            agent_name = agent["name"]
+            persona_desc = agent["persona_instruction"]
             prompt = self.prompts.generator.format(
                 persona_name=agent_name,
                 persona_instruction=persona_desc,
                 query=request.query,
             )
-            model_id = self._model_for(f"generator_{index + 1}", DEFAULT_MODEL_MAP["generator_1"], request.custom_model_map)
+            model_id = agent["model"]
             yield {"type": "generator_start", "agent": agent_name, "model": model_id}
             started_at = time.perf_counter()
             async def pump_generator(
@@ -148,13 +162,16 @@ class CouncilWorkflow:
                     async for update in client.stream_generate(
                         generator_prompt,
                         model=model,
-                        max_tokens=700,
+                        # Keep internal reasoning economical without imposing an output ceiling.
+                        reasoning_effort="low",
                     ):
                         if update.delta:
                             content += update.delta
                             await generator_queue.put(("chunk", name, update.delta))
                         if update.usage is not None:
                             usage = update.usage
+                    if not content.strip():
+                        raise RuntimeError("The model completed without visible answer text. Try running this agent again.")
                     await generator_queue.put(("done", name, (content, usage, model, started)))
                 except Exception as exc:  # pragma: no cover - defensive async boundary
                     await generator_queue.put(("error", name, exc))
@@ -196,8 +213,9 @@ class CouncilWorkflow:
 
         responses = [
             {"persona": agent_name, "content": responses_by_agent[agent_name]}
-            for agent_name in active_agents
-            if agent_name in responses_by_agent
+            for agent in active_agents
+            if agent["name"] in responses_by_agent
+            for agent_name in [agent["name"]]
         ]
 
         if not responses:
@@ -257,7 +275,7 @@ class CouncilWorkflow:
                 yield {"type": "critic_result", **critic_data}
             yield {"type": "critic_done"}
         else:
-            auto_win = build_auto_win(active_agents[0])
+            auto_win = build_auto_win(active_agents[0]["name"])
             critique_results.append(auto_win)
             tracer.log_step("Critics", "Auto-Critic", "Single Agent", json.dumps(auto_win))
             yield {"type": "critic_result", **auto_win}

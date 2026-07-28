@@ -38,6 +38,17 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(response.status_code, 500)
         self.assertIn("network unavailable", response.json()["detail"])
 
+    def test_summon_rejects_duplicate_or_unknown_custom_agents(self):
+        response = self.client.post(
+            "/api/summon",
+            json={
+                "query": "Test",
+                "selected_agents": ["missing"],
+                "agents": [{"id": "agent-1", "name": "Custom", "persona_instruction": "Be concise.", "model": "openai/gpt-oss-20b"}],
+            },
+        )
+        self.assertEqual(response.status_code, 422)
+
 
 if __name__ == "__main__":
     unittest.main()

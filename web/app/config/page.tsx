@@ -301,9 +301,9 @@ export default function ConfigPage() {
                 <RefreshCcw className="h-5 w-5" />
               </div>
               <div>
-                <h2 className="mb-2 text-xl font-semibold">Agent Model Alignment</h2>
+                <h2 className="mb-2 text-xl font-semibold">Council Phase Models</h2>
                 <p className="text-sm text-[var(--text-muted)]">
-                  Assign specific models to council members and synthesis phases.
+                  Assign models to the critic, blueprint architect, and final synthesis. Generator models are managed in Agents.
                 </p>
               </div>
             </div>
@@ -318,19 +318,6 @@ export default function ConfigPage() {
           </div>
 
           <div className="relative z-10 grid gap-4 md:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-            {defaults?.personas.map((agent, index) => (
-              <ModelInput
-                key={agent}
-                label={agent}
-                value={draftModelMap[agent] || ''}
-                defaultValue={
-                  defaults.model_map[`generator_${index + 1}`] || defaults.model_map.generator_1 || ''
-                }
-                status={modelStatuses[agent]}
-                onChange={(value) => handleModelChange(agent, value)}
-              />
-            ))}
-
             <ModelInput
               label="Critic"
               value={draftModelMap.critic || ''}

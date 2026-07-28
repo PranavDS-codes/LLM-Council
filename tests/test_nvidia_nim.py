@@ -50,6 +50,7 @@ class NvidiaNimTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(request.await_args.kwargs["model"], "openai/gpt-oss-20b")
         self.assertNotIn("extra_headers", request.await_args.kwargs)
+        self.assertEqual(request.await_args.kwargs["max_tokens"], 1)
 
     async def test_stream_generate_preserves_deltas_and_terminal_usage(self):
         client = LLMClient(api_key="nvapi-test-key", settings=get_settings())

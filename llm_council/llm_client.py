@@ -31,7 +31,7 @@ class LLMClient:
             base_url=self.settings.nvidia_api_base_url,
         ) if not self.mock_mode else None
         
-    async def generate(self, prompt: str, schema: Optional[Any] = None, model: Optional[str] = None, max_tokens: Optional[int] = None):
+    async def generate(self, prompt: str, schema: Optional[Any] = None, model: Optional[str] = None):
         """
         Generates a response from the LLM. 
         Returns (content, usage_dict).
@@ -39,14 +39,14 @@ class LLMClient:
         if self.mock_mode:
             return await self._mock_generate(prompt, schema)
         
-        return await self._real_generate(prompt, schema, model, max_tokens)
+        return await self._real_generate(prompt, schema, model)
 
     async def stream_generate(
         self,
         prompt: str,
         schema: Optional[Any] = None,
         model: Optional[str] = None,
-        max_tokens: Optional[int] = None,
+        reasoning_effort: Optional[str] = None,
     ) -> AsyncIterator[StreamUpdate]:
         """Yield true NVIDIA NIM deltas followed by terminal token usage."""
         if self.mock_mode:
@@ -64,8 +64,8 @@ class LLMClient:
             "stream": True,
             "stream_options": {"include_usage": True},
         }
-        if max_tokens is not None:
-            kwargs["max_tokens"] = max_tokens
+        if reasoning_effort is not None:
+            kwargs["reasoning_effort"] = reasoning_effort
         if schema:
             kwargs["response_format"] = {"type": "json_object"}
 
@@ -85,6 +85,7 @@ class LLMClient:
                         }
                     if not chunk.choices:
                         continue
+                    # Forward answer text only. Provider reasoning fields are never persisted or streamed.
                     delta = chunk.choices[0].delta.content or ""
                     if delta:
                         emitted_content = True
@@ -93,10 +94,14 @@ class LLMClient:
                 return
             except APIStatusError as exc:
                 print(f"[ERROR] NVIDIA NIM stream status error: {exc.status_code} - {exc}")
-                if exc.status_code == 422 and not emitted_content:
+                if exc.status_code in [400, 422] and not emitted_content:
                     if "response_format" in kwargs:
                         print("[WARNING] Retrying NVIDIA NIM stream without response_format.")
                         del kwargs["response_format"]
+                        continue
+                    if "reasoning_effort" in kwargs:
+                        # Preserve compatibility with custom NIM models that do not expose this control.
+                        del kwargs["reasoning_effort"]
                         continue
                     if "stream_options" in kwargs:
                         # Some OpenAI-compatible NIM deployments omit usage support.
@@ -139,7 +144,7 @@ class LLMClient:
         else:
             return f"Mock Response to: {prompt[:50]}...", usage
 
-    async def _real_generate(self, prompt: str, schema: Optional[Any] = None, model: Optional[str] = None, max_tokens: Optional[int] = None):
+    async def _real_generate(self, prompt: str, schema: Optional[Any] = None, model: Optional[str] = None):
         target_model = model if model else DEFAULT_MODEL_MAP["generator_1"]
         
         kwargs = {
@@ -149,8 +154,6 @@ class LLMClient:
         
         if schema:
             kwargs["response_format"] = {"type": "json_object"}
-        if max_tokens is not None:
-            kwargs["max_tokens"] = max_tokens
         
         max_retries = 3
         base_delay = 2
@@ -227,6 +230,7 @@ class LLMClient:
         kwargs = {
             "model": model,
             "messages": [{"role": "user", "content": "Hi"}],
+            # Keep connectivity checks inexpensive; this does not affect council responses.
             "max_tokens": 1,
         }
         

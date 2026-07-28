@@ -1,4 +1,12 @@
-import type { Agent, CouncilMetrics, CouncilSession, MetricData, MetricUsage, SessionIssue, SessionStatus } from './types';
+import type { Agent, AgentRegistryEntry, CouncilMetrics, CouncilSession, MetricData, MetricUsage, SessionIssue, SessionStatus } from './types';
+
+const LEGACY_AGENT_REGISTRY: AgentRegistryEntry[] = [
+  ['The Academic', 'You are a rigorous researcher. Focus on definitions, historical context, theoretical frameworks, and first principles. Cite logical fallacies if present. Use formal, precise language. Prioritize accuracy and depth over simplicity.'],
+  ['The Layman', 'You are a regular person who values common sense. You hate jargon. Explain how this affects daily life using plain English, analogies, and simple metaphors. Be skeptical of over-complication.'],
+  ['The Skeptic', 'You are a critical thinker who looks for the catch. Question the premise, identify edge cases, security risks, downsides, and hidden costs. Focus on risk mitigation.'],
+  ['The Futurist', 'You are a visionary focused on the long-term horizon. Discuss trends, exponential technologies, and second-order effects. Focus on what is possible while acknowledging disruptive potential.'],
+  ['The Ethical Guardian', 'You are a moral philosopher and safety advocate. Focus on societal impact, bias, fairness, environmental cost, and human well-being. Ask should we rather than can we. Prioritize safety and responsibility.'],
+].map(([name, personaInstruction]) => ({ id: name, name, personaInstruction, model: 'openai/gpt-oss-20b' }));
 
 type PersistedSettings = {
   apiKey: string;
@@ -12,6 +20,9 @@ type MergeableCouncilState = {
   theme: 'dark' | 'light';
   isStreaming: boolean;
   abortController: AbortController | null;
+  agents: Agent[];
+  agentRegistry: AgentRegistryEntry[];
+  agentDraft: AgentRegistryEntry[];
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -31,6 +42,36 @@ function sanitizeStringRecord(value: unknown): Record<string, string> {
 function sanitizeNvidiaModelOverrides(value: unknown): Record<string, string> {
   return Object.fromEntries(
     Object.entries(sanitizeStringRecord(value)).filter(([, model]) => !model.endsWith(':free')),
+  );
+}
+
+function sanitizeAgentRegistry(value: unknown, legacyModels: Record<string, string>): AgentRegistryEntry[] {
+  if (!Array.isArray(value)) {
+    return LEGACY_AGENT_REGISTRY.map((agent, index) => ({
+      ...agent,
+      model: legacyModels[agent.name] || legacyModels[`generator_${index + 1}`] || agent.model,
+    }));
+  }
+
+  const ids = new Set<string>();
+  const names = new Set<string>();
+  const entries = value.flatMap((agent) => {
+    if (!isRecord(agent) || typeof agent.id !== 'string' || typeof agent.name !== 'string' || typeof agent.personaInstruction !== 'string' || typeof agent.model !== 'string') return [];
+    const id = agent.id.trim();
+    const name = agent.name.trim();
+    const personaInstruction = agent.personaInstruction.trim();
+    const model = agent.model.trim();
+    if (!id || !name || !personaInstruction || !model || ids.has(id) || names.has(name.toLowerCase())) return [];
+    ids.add(id);
+    names.add(name.toLowerCase());
+    return [{ id, name, personaInstruction, model }];
+  });
+  return entries.length > 0 ? entries : LEGACY_AGENT_REGISTRY;
+}
+
+function sanitizePhaseModelOverrides(value: unknown): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(sanitizeNvidiaModelOverrides(value)).filter(([role]) => ['critic', 'architect', 'finalizer'].includes(role)),
   );
 }
 
@@ -210,6 +251,11 @@ export function mergePersistedCouncilState<T extends MergeableCouncilState>(
 ): T {
   const raw = isRecord(persistedState) ? persistedState : {};
   const rawSettings = isRecord(raw.settings) ? raw.settings : {};
+  const legacyModels = sanitizeNvidiaModelOverrides(rawSettings.modelOverrides);
+  const agentRegistry = sanitizeAgentRegistry(raw.agentRegistry, legacyModels);
+  const agentDraft = Array.isArray(raw.agentDraft)
+    ? sanitizeAgentRegistry(raw.agentDraft, {})
+    : agentRegistry;
   const hydratedSessions = Array.isArray(raw.sessions)
     ? raw.sessions
         .map(sanitizeSession)
@@ -228,8 +274,11 @@ export function mergePersistedCouncilState<T extends MergeableCouncilState>(
     settings: {
       // Keys saved before the NIM migration cannot authenticate with NVIDIA.
       apiKey: '',
-      modelOverrides: sanitizeNvidiaModelOverrides(rawSettings.modelOverrides),
+      modelOverrides: sanitizePhaseModelOverrides(rawSettings.modelOverrides),
     },
+    agentRegistry,
+    agentDraft,
+    agents: agentRegistry.map((agent) => ({ id: agent.id, name: agent.name, selected: true })),
     sessions: hydratedSessions,
   };
 }

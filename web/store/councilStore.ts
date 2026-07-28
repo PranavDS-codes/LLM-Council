@@ -2,24 +2,21 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { getApiUrl } from '@/lib/api';
+import { DEFAULT_AGENT_REGISTRY } from '@/lib/defaultAgents';
 
 import { cleanModelOverrides } from './configState';
 import { mergePersistedCouncilState } from './persistState';
 import { parseSseChunk } from './sse';
 import { applyCouncilEvent, createSession, deriveLoadPhase, stopSessionState } from './sessionState';
-import type { Agent, CouncilSession } from './types';
+import type { Agent, AgentRegistryEntry, CouncilSession } from './types';
 
-const INITIAL_AGENTS: Agent[] = [
-  { id: 'The Academic', name: 'The Academic', selected: true },
-  { id: 'The Layman', name: 'The Layman', selected: true },
-  { id: 'The Skeptic', name: 'The Skeptic', selected: true },
-  { id: 'The Futurist', name: 'The Futurist', selected: true },
-  { id: 'The Ethical Guardian', name: 'The Ethical Guardian', selected: true },
-];
+const selectAllAgents = (registry: AgentRegistryEntry[]): Agent[] => registry.map(({ id, name }) => ({ id, name, selected: true }));
 
 export interface CouncilState {
   query: string;
   agents: Agent[];
+  agentRegistry: AgentRegistryEntry[];
+  agentDraft: AgentRegistryEntry[];
   isStreaming: boolean;
   abortController: AbortController | null;
   theme: 'dark' | 'light';
@@ -35,6 +32,9 @@ export interface CouncilState {
   resetAll: () => void;
   toggleTheme: () => void;
   setSettings: (settings: Partial<CouncilState['settings']>) => void;
+  setAgentRegistry: (registry: AgentRegistryEntry[]) => void;
+  setAgentDraft: (registry: AgentRegistryEntry[]) => void;
+  resetAgentRegistry: () => void;
   startSession: () => Promise<void>;
   stopSession: () => void;
   loadSession: (sessionId: string) => void;
@@ -53,7 +53,9 @@ export const useCouncilStore = create<CouncilState>()(
   persist(
     (set, get) => ({
       query: '',
-      agents: INITIAL_AGENTS,
+      agents: selectAllAgents(DEFAULT_AGENT_REGISTRY),
+      agentRegistry: DEFAULT_AGENT_REGISTRY,
+      agentDraft: DEFAULT_AGENT_REGISTRY,
       isStreaming: false,
       abortController: null,
       theme: 'dark',
@@ -76,13 +78,7 @@ export const useCouncilStore = create<CouncilState>()(
           agents: state.agents.map((agent) => ({ ...agent, selected })),
         })),
       resetAll: () =>
-        set({
-          query: '',
-          agents: INITIAL_AGENTS,
-          currentSessionId: null,
-          isStreaming: false,
-          abortController: null,
-        }),
+        set((state) => ({ query: '', agents: selectAllAgents(state.agentRegistry), currentSessionId: null, isStreaming: false, abortController: null })),
       toggleTheme: () =>
         set((state) => ({
           theme: state.theme === 'dark' ? 'light' : 'dark',
@@ -97,6 +93,21 @@ export const useCouncilStore = create<CouncilState>()(
               : state.settings.modelOverrides,
           },
         })),
+      setAgentRegistry: (agentRegistry) => set((state) => ({
+        agentRegistry,
+        agentDraft: agentRegistry,
+        agents: agentRegistry.map((entry) => ({
+          id: entry.id,
+          name: entry.name,
+          selected: state.agents.find((agent) => agent.id === entry.id)?.selected ?? true,
+        })),
+      })),
+      setAgentDraft: (agentDraft) => set({ agentDraft }),
+      resetAgentRegistry: () => set({
+        agentRegistry: DEFAULT_AGENT_REGISTRY,
+        agentDraft: DEFAULT_AGENT_REGISTRY,
+        agents: selectAllAgents(DEFAULT_AGENT_REGISTRY),
+      }),
       deleteSession: (id) =>
         set((state) => ({
           sessions: state.sessions.filter((session) => session.id !== id),
@@ -111,7 +122,11 @@ export const useCouncilStore = create<CouncilState>()(
         set({
           currentSessionId: sessionId,
           query: session.query,
-          agents: session.agents,
+          agents: get().agentRegistry.map((entry) => ({
+            id: entry.id,
+            name: entry.name,
+            selected: session.agents.find((agent) => agent.id === entry.id)?.selected ?? false,
+          })),
           sessions: updateSession(get().sessions, sessionId, (currentSession) => ({
             ...currentSession,
             activePhase: currentSession.activePhase || deriveLoadPhase(currentSession),
@@ -160,6 +175,12 @@ export const useCouncilStore = create<CouncilState>()(
               custom_model_map: Object.keys(state.settings.modelOverrides).length > 0
                 ? state.settings.modelOverrides
                 : undefined,
+              agents: state.agentRegistry.map((agent) => ({
+                id: agent.id,
+                name: agent.name,
+                persona_instruction: agent.personaInstruction,
+                model: agent.model,
+              })),
             }),
             signal: controller.signal,
           });
@@ -229,6 +250,8 @@ export const useCouncilStore = create<CouncilState>()(
         currentSessionId: state.currentSessionId,
         theme: state.theme,
         settings: state.settings,
+        agentRegistry: state.agentRegistry,
+        agentDraft: state.agentDraft,
       }),
       merge: (persistedState, currentState) => mergePersistedCouncilState(persistedState, currentState),
     },

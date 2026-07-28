@@ -15,6 +15,7 @@ import {
   Moon,
   PauseCircle,
   PlusCircle,
+  Users,
   Settings,
   Sun,
   Trash2,
@@ -107,6 +108,17 @@ export function Sidebar() {
           <PlusCircle className="h-4 w-4" />
           {!isCollapsed && <span>Summon New</span>}
         </button>
+
+        <a
+          href="/agents"
+          className={`flex items-center justify-center gap-2 rounded-md border border-cyan-500/30 bg-cyan-500/10 font-mono text-sm uppercase tracking-wide text-cyan-100 transition-colors hover:bg-cyan-500/20 ${
+            isCollapsed ? 'h-8 w-8 rounded-full p-0' : 'w-full px-4 py-2'
+          }`}
+          title="Manage Agents"
+        >
+          <Users className="h-4 w-4" />
+          {!isCollapsed && <span>Agents</span>}
+        </a>
 
         <a
           href="/config"

@@ -99,6 +99,34 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(critic_event["winner_id"], "The Academic")
         self.assertTrue(any(event["type"] == "finalizer_done" for event in events))
 
+    async def test_custom_agent_uses_its_prompt_and_model(self):
+        class RecordingClient(FakeClient):
+            def __init__(self, responses):
+                super().__init__(responses)
+                self.calls = []
+
+            async def stream_generate(self, *args, **kwargs):
+                self.calls.append((args, kwargs))
+                async for update in super().stream_generate(*args, **kwargs):
+                    yield update
+
+        fake_client = RecordingClient([
+            ("Custom draft", {"prompt": 1, "completion": 1, "total": 2}),
+            (json.dumps({"structure": ["Intro"], "tone_guidelines": "Clear", "missing_facts_to_add": [], "critique_integration": "Use it."}), {"prompt": 1, "completion": 1, "total": 2}),
+            ("Final", {"prompt": 1, "completion": 1, "total": 2}),
+        ])
+        workflow = CouncilWorkflow(settings=get_settings(), client_factory=lambda **kwargs: fake_client)
+        events = [event async for event in workflow.stream(WorkflowRequest(
+            query="Test", selected_agents=["custom"],
+            custom_agents=[{"id": "custom", "name": "Custom Agent", "persona_instruction": "CUSTOM DIRECTIVE", "model": "model/custom"}],
+        ))]
+
+        self.assertTrue(any(event.get("agent") == "Custom Agent" for event in events))
+        self.assertIn("CUSTOM DIRECTIVE", fake_client.calls[0][0][0])
+        self.assertEqual(fake_client.calls[0][1]["model"], "model/custom")
+        self.assertNotIn("max_tokens", fake_client.calls[0][1])
+        self.assertEqual(fake_client.calls[0][1]["reasoning_effort"], "low")
+
     async def test_generator_failure_emits_error(self):
         fake_client = FakeClient([RuntimeError("boom")])
         workflow = CouncilWorkflow(

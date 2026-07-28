@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from typing import Any, AsyncIterator, Literal, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -16,6 +17,7 @@ from .workflow import CouncilWorkflow, WorkflowRequest
 settings = get_settings()
 workflow = CouncilWorkflow(settings=settings)
 app = FastAPI(title="LLM Council API")
+SSE_HEARTBEAT_SECONDS = 10
 
 app.add_middleware(
     CORSMiddleware,
@@ -99,7 +101,7 @@ def format_sse(event_type: str, data: dict[str, Any]) -> str:
 
 
 async def stream_workflow(request: SummonRequest) -> AsyncIterator[str]:
-    async for event in workflow.stream(
+    event_iterator = workflow.stream(
         WorkflowRequest(
             query=request.query,
             selected_agents=request.selected_agents,
@@ -107,9 +109,27 @@ async def stream_workflow(request: SummonRequest) -> AsyncIterator[str]:
             custom_model_map=request.custom_model_map,
             custom_agents=[agent.model_dump() for agent in request.agents] if request.agents else None,
         )
-    ):
-        event_type = event.get("type", "message")
-        yield format_sse(event_type, event)
+    ).__aiter__()
+    pending_event = asyncio.ensure_future(anext(event_iterator))
+    try:
+        while True:
+            completed, _ = await asyncio.wait({pending_event}, timeout=SSE_HEARTBEAT_SECONDS)
+            if not completed:
+                # Keep Render and browser proxies from closing quiet streams while NIM reasons.
+                yield ": keepalive\n\n"
+                continue
+            try:
+                event = pending_event.result()
+            except StopAsyncIteration:
+                break
+            event_type = event.get("type", "message")
+            yield format_sse(event_type, event)
+            pending_event = asyncio.ensure_future(anext(event_iterator))
+    finally:
+        if not pending_event.done():
+            pending_event.cancel()
+            await asyncio.gather(pending_event, return_exceptions=True)
+        await event_iterator.aclose()
 
 
 async def stream_follow_up_chat(request: FollowUpChatRequest) -> AsyncIterator[str]:

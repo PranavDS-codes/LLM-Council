@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Dict, Optional
+from typing import List, Dict
 
 class CriticOutput(BaseModel):
     winner_id: str = Field(description="The ID of the winning response")
@@ -8,9 +8,17 @@ class CriticOutput(BaseModel):
     flaws: Dict[str, str] = Field(description="A dictionary mapping Agent IDs to their specific flaws")
     scores: Dict[str, int] = Field(description="A dictionary mapping Agent IDs to their numeric scores (1-10)")
 
+
+class CriticScorecard(BaseModel):
+    metric_scores: Dict[str, int] = Field(description="Scores from 1-10 for the five required metrics")
+    critique: str = Field(description="Specific, useful critique for this response")
+
+
+class CriticBatchOutput(BaseModel):
+    reviews: Dict[str, CriticScorecard] = Field(description="Scorecards keyed by the reviewed agent name")
+
 class ArchitectBlueprint(BaseModel):
     structure: List[str] = Field(description="Ordered list of section headers with instructions")
     tone_guidelines: str = Field(description="Voice and style instructions")
     missing_facts_to_add: List[str] = Field(description="Specific facts or corrections to inject")
     critique_integration: str = Field(description="Strategy for merging critique feedback")
-

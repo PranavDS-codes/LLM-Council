@@ -11,6 +11,8 @@ import type {
   GeneratorDoneEvent,
   MetricData,
   MetricUsage,
+  FollowUpChatEvent,
+  FollowUpMessage,
 } from './types';
 
 export function emptyUsage(): MetricUsage {
@@ -36,6 +38,10 @@ export function createSession(id: string, query: string, agents: Agent[]): Counc
     architectData: null,
     finalizerModel: null,
     finalizerText: '',
+    followUpChat: {
+      selectedModel: 'openai/gpt-oss-20b',
+      messages: [],
+    },
     issues: [],
     metrics: {
       generators: {},
@@ -43,6 +49,38 @@ export function createSession(id: string, query: string, agents: Agent[]): Counc
       totalTokens: emptyUsage(),
     },
   };
+}
+
+function updateActiveFollowUpMessage(
+  session: CouncilSession,
+  updater: (message: FollowUpMessage) => FollowUpMessage,
+): CouncilSession {
+  const index = session.followUpChat.messages.findLastIndex(
+    (message) => message.role === 'assistant' && message.status === 'streaming',
+  );
+  if (index < 0) return session;
+  const messages = [...session.followUpChat.messages];
+  messages[index] = updater(messages[index]);
+  return { ...session, followUpChat: { ...session.followUpChat, messages } };
+}
+
+export function applyFollowUpChatEvent(session: CouncilSession, event: FollowUpChatEvent): CouncilSession {
+  switch (event.type) {
+    case 'chat_start':
+      return updateActiveFollowUpMessage(session, (message) => ({ ...message, model: event.model }));
+    case 'chat_reasoning_chunk':
+      return updateActiveFollowUpMessage(session, (message) => ({ ...message, reasoning: `${message.reasoning}${event.chunk}` }));
+    case 'chat_content_chunk':
+      return updateActiveFollowUpMessage(session, (message) => ({ ...message, content: `${message.content}${event.chunk}` }));
+    case 'chat_done':
+      return updateActiveFollowUpMessage(session, (message) => ({ ...message, model: event.model, status: 'completed', usage: event.usage }));
+    case 'chat_error':
+      return updateActiveFollowUpMessage(session, (message) => ({ ...message, status: 'error', error: event.message }));
+  }
+}
+
+export function stopFollowUpChatState(session: CouncilSession): CouncilSession {
+  return updateActiveFollowUpMessage(session, (message) => ({ ...message, status: 'stopped' }));
 }
 
 export function deriveLoadPhase(session: Pick<CouncilSession, 'finalizerText' | 'architectData' | 'criticData'>): 1 | 2 | 3 | 4 {
@@ -85,6 +123,8 @@ function mergeCriticData(previous: CriticData | null, incoming: CriticResultEven
     ...incoming,
     scores: { ...(previous?.scores || {}), ...(incoming.scores || {}) },
     flaws: { ...(previous?.flaws || {}), ...(incoming.flaws || {}) },
+    scorecards: { ...(previous?.scorecards || {}), ...(incoming.scorecards || {}) },
+    finalists: incoming.finalists || previous?.finalists || [],
     reasoning: [previousReasoning, nextReasoning].filter(Boolean).join('\n\n---\n\n'),
     rankings: incoming.rankings || previous?.rankings || [],
     winner_id: [previous?.winner_id, incoming.winner_id].filter(Boolean).join(' & '),

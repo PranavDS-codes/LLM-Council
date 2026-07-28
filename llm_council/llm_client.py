@@ -1,6 +1,7 @@
 import asyncio
 import json
 import random
+import re
 from dataclasses import dataclass
 from typing import AsyncIterator, Optional, Any
 
@@ -16,6 +17,7 @@ class StreamUpdate:
     """One upstream token delta or the terminal usage record for a request."""
 
     delta: str = ""
+    reasoning: str = ""
     usage: UsageDict | None = None
 
 class LLMClient:
@@ -57,10 +59,52 @@ class LLMClient:
             yield StreamUpdate(usage=usage)
             return
 
+        async for update in self._stream_messages(
+            [{"role": "user", "content": prompt}],
+            schema=schema,
+            model=model,
+            reasoning_effort=reasoning_effort,
+        ):
+            yield update
+
+    async def stream_chat(
+        self,
+        messages: list[dict[str, str]],
+        model: str,
+        reasoning_effort: str = "medium",
+    ) -> AsyncIterator[StreamUpdate]:
+        """Stream a follow-up conversation, including provider reasoning when supplied."""
+        if self.mock_mode:
+            yield StreamUpdate(reasoning="Reviewing the final council report before answering.")
+            answer = f"Mock follow-up response to: {messages[-1]['content']}"
+            for index in range(0, len(answer), 48):
+                await asyncio.sleep(0)
+                yield StreamUpdate(delta=answer[index:index + 48])
+            yield StreamUpdate(usage={"prompt": 100, "completion": 50, "total": 150})
+            return
+
+        async for update in self._stream_messages(
+            messages,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            include_reasoning=True,
+        ):
+            yield update
+
+    async def _stream_messages(
+        self,
+        messages: list[dict[str, str]],
+        schema: Optional[Any] = None,
+        model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
+        include_reasoning: bool = False,
+    ) -> AsyncIterator[StreamUpdate]:
+        """Shared NVIDIA stream implementation for council work and follow-up chat."""
+
         target_model = model if model else DEFAULT_MODEL_MAP["generator_1"]
         kwargs: dict[str, Any] = {
             "model": target_model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
             "stream": True,
             "stream_options": {"include_usage": True},
         }
@@ -85,8 +129,13 @@ class LLMClient:
                         }
                     if not chunk.choices:
                         continue
-                    # Forward answer text only. Provider reasoning fields are never persisted or streamed.
-                    delta = chunk.choices[0].delta.content or ""
+                    stream_delta = chunk.choices[0].delta
+                    if include_reasoning:
+                        # NVIDIA-compatible implementations use either field depending on runtime version.
+                        reasoning = getattr(stream_delta, "reasoning_content", None) or getattr(stream_delta, "reasoning", None) or ""
+                        if isinstance(reasoning, str) and reasoning:
+                            yield StreamUpdate(reasoning=reasoning)
+                    delta = stream_delta.content or ""
                     if delta:
                         emitted_content = True
                         yield StreamUpdate(delta=delta)
@@ -125,13 +174,10 @@ class LLMClient:
         usage = {"prompt": 100, "completion": 50, "total": 150}
 
         if "You are an impartial Senior Quality Assurance Judge" in prompt:
+             agents = re.findall(r"--- RESPONSE ID: (.+?) ---", prompt)
              return json.dumps({
-                "winner_id": "Response A",
-                "rankings": ["Response A", "Response B", "Response C"],
-                "reasoning": "Response A provided the most depth.",
-                "flaws": {"Response B": "Too brief", "Response C": "Hallucinated data"},
-                "scores": {"Response A": 9, "Response B": 7, "Response C": 5}
-            }), usage
+                "reviews": {agent: {"metric_scores": {"accuracy": 9, "relevance": 9, "completeness": 9, "clarity": 8, "practical_usefulness": 8}, "critique": "Strong overall response."} for agent in agents}
+             }), usage
         elif "You are the Chief Solutions Architect" in prompt:
             return json.dumps({
                 "structure": ["Introduction", "Analysis", "Conclusion"],

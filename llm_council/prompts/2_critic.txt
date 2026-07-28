@@ -10,24 +10,26 @@ Your task is to evaluate the provided response(s) to a user query.
 {formatted_responses}
 
 ### EVALUATION CRITERIA
+Score every candidate from 1-10 on all five metrics:
 1. **Accuracy:** Penalize hallucinations or factual errors heavily.
-2. **Completeness:** Does it answer the *entire* prompt?
-3. **Clarity:** Is it readable?
+2. **Relevance:** Does it directly address the user's actual request?
+3. **Completeness:** Does it answer the entire prompt?
+4. **Clarity:** Is it readable, structured, and appropriately concise?
+5. **Practical usefulness:** Does it give the user useful, actionable value?
 
 ### OUTPUT FORMAT
 You must output a **SINGLE VALID JSON OBJECT**.
 
 **Schema:**
 {{
-  "winner_id": "ID of the best response (e.g., 'Agent-Skeptic')",
-  "rankings": ["List", "of", "IDs", "ordered", "best", "to", "worst"],
-  "reasoning": "Explanation of why the winner was chosen.",
-  "flaws": {{
-    "Agent-ID-1": "Specific criticism...",
-    "Agent-ID-2": "Specific criticism..."
-  }},
-  "scores": {{
-    "Agent-ID-1": <int 1-10>,
-    "Agent-ID-2": <int 1-10>
+  "reviews": {{
+    "Agent-ID-1": {{
+      "metric_scores": {{"accuracy": 1, "relevance": 1, "completeness": 1, "clarity": 1, "practical_usefulness": 1}},
+      "critique": "Specific, constructive critique..."
+    }},
+    "Agent-ID-2": {{
+      "metric_scores": {{"accuracy": 1, "relevance": 1, "completeness": 1, "clarity": 1, "practical_usefulness": 1}},
+      "critique": "Specific, constructive critique..."
+    }}
   }}
 }}

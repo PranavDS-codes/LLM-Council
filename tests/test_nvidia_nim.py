@@ -81,6 +81,33 @@ class NvidiaNimTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(request.await_args.kwargs["stream"])
         self.assertNotIn("extra_headers", request.await_args.kwargs)
 
+    async def test_stream_chat_preserves_reasoning_and_does_not_set_a_token_cap(self):
+        client = LLMClient(api_key="nvapi-test-key", settings=get_settings())
+
+        async def chunks():
+            yield types.SimpleNamespace(
+                choices=[types.SimpleNamespace(delta=types.SimpleNamespace(content=None, reasoning_content="Checking the report."))],
+                usage=None,
+            )
+            yield types.SimpleNamespace(
+                choices=[types.SimpleNamespace(delta=types.SimpleNamespace(content="Grounded answer.", reasoning_content=None))],
+                usage=None,
+            )
+            yield types.SimpleNamespace(choices=[], usage=types.SimpleNamespace(prompt_tokens=8, completion_tokens=5, total_tokens=13))
+
+        request = AsyncMock(return_value=chunks())
+        client.openai_client = types.SimpleNamespace(chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=request)))
+
+        updates = [update async for update in client.stream_chat(
+            [{"role": "system", "content": "Final report"}, {"role": "user", "content": "Explain it"}],
+            model="openai/gpt-oss-20b",
+        )]
+
+        self.assertEqual("".join(update.reasoning for update in updates), "Checking the report.")
+        self.assertEqual("".join(update.delta for update in updates), "Grounded answer.")
+        self.assertEqual(request.await_args.kwargs["reasoning_effort"], "medium")
+        self.assertNotIn("max_tokens", request.await_args.kwargs)
+
 
 if __name__ == "__main__":
     unittest.main()

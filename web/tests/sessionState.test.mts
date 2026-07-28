@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { applyCouncilEvent, createSession, stopSessionState } from '../store/sessionState.ts';
+import { applyCouncilEvent, applyFollowUpChatEvent, createSession, stopFollowUpChatState, stopSessionState } from '../store/sessionState.ts';
 
 const agents = [
   { id: 'The Academic', name: 'The Academic', selected: true },
@@ -70,4 +70,26 @@ test('live phase buffers preserve generator tabs and structured progress', () =>
   assert.equal(session.criticProgress?.totalBatches, 2);
   assert.equal(session.criticStream, '{"scores":');
   assert.equal(session.architectStream, '{"structure":');
+});
+
+test('follow-up chat keeps reasoning, answer, and usage in the session', () => {
+  let session = createSession('4', 'Follow up', agents);
+  session.status = 'completed';
+  session.finalizerText = 'Final report';
+  session.followUpChat.messages = [
+    { id: 'user', role: 'user', content: 'Explain this', reasoning: '', timestamp: 1 },
+    { id: 'assistant', role: 'assistant', content: '', reasoning: '', timestamp: 2, model: 'openai/gpt-oss-20b', status: 'streaming' },
+  ];
+  session = applyFollowUpChatEvent(session, { type: 'chat_reasoning_chunk', chunk: 'Checking ' });
+  session = applyFollowUpChatEvent(session, { type: 'chat_content_chunk', chunk: 'Here is why.' });
+  session = applyFollowUpChatEvent(session, { type: 'chat_done', model: 'openai/gpt-oss-120b', usage: { prompt: 4, completion: 5, total: 9 } });
+
+  const reply = session.followUpChat.messages[1];
+  assert.equal(reply.reasoning, 'Checking ');
+  assert.equal(reply.content, 'Here is why.');
+  assert.equal(reply.model, 'openai/gpt-oss-120b');
+  assert.equal(reply.usage?.total, 9);
+
+  session.followUpChat.messages.push({ id: 'stopped', role: 'assistant', content: '', reasoning: '', timestamp: 3, status: 'streaming' });
+  assert.equal(stopFollowUpChatState(session).followUpChat.messages.at(-1)?.status, 'stopped');
 });

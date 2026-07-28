@@ -8,6 +8,10 @@ import type {
   ErrorEvent,
   FinalizerDoneEvent,
   FinalizerStartEvent,
+  FollowUpChatEvent,
+  ChatDoneEvent,
+  ChatErrorEvent,
+  ChatStartEvent,
   GeneratorDoneEvent,
   GeneratorStartEvent,
   MetricUsage,
@@ -71,6 +75,20 @@ function normalizeEvent(type: string, payload: Record<string, unknown>): Council
         scores: typeof payload.scores === 'object' && payload.scores
           ? Object.fromEntries(Object.entries(payload.scores).map(([key, value]) => [key, Number(value)]))
           : {},
+        scorecards: typeof payload.scorecards === 'object' && payload.scorecards
+          ? Object.fromEntries(Object.entries(payload.scorecards).flatMap(([agent, value]) => {
+              if (!value || typeof value !== 'object') return [];
+              const card = value as Record<string, unknown>;
+              const metricScores = card.metric_scores;
+              if (!metricScores || typeof metricScores !== 'object') return [];
+              return [[agent, {
+                metric_scores: Object.fromEntries(Object.entries(metricScores).map(([metric, score]) => [metric, Number(score)])),
+                average: Number(card.average || 0),
+                critique: String(card.critique || ''),
+              }]];
+            }))
+          : undefined,
+        finalists: Array.isArray(payload.finalists) ? payload.finalists.map(String) : undefined,
         time_taken: Number(payload.time_taken || 0),
         model: typeof payload.model === 'string' ? payload.model : 'N/A',
         usage: toUsage(payload.usage),
@@ -198,5 +216,57 @@ export function parseSseChunk(buffer: string, chunk: string): ParsedSseResult {
   return {
     buffer: nextBuffer,
     events,
+  };
+}
+
+export interface ParsedFollowUpSseResult {
+  buffer: string;
+  events: FollowUpChatEvent[];
+}
+
+function normalizeFollowUpEvent(type: string, payload: Record<string, unknown>): FollowUpChatEvent | null {
+  const model = payload.model;
+  const supportedModel = model === 'openai/gpt-oss-20b' || model === 'openai/gpt-oss-120b';
+  switch (type) {
+    case 'chat_start':
+      return supportedModel ? { type, model } satisfies ChatStartEvent : null;
+    case 'chat_reasoning_chunk':
+      return typeof payload.chunk === 'string' ? { type, chunk: payload.chunk } : null;
+    case 'chat_content_chunk':
+      return typeof payload.chunk === 'string' ? { type, chunk: payload.chunk } : null;
+    case 'chat_done':
+      return supportedModel ? { type, model, usage: toUsage(payload.usage) } satisfies ChatDoneEvent : null;
+    case 'chat_error':
+      return { type, message: String(payload.message || 'Follow-up chat stream failed.'), recoverable: payload.recoverable !== false } satisfies ChatErrorEvent;
+    default:
+      return null;
+  }
+}
+
+function parseFollowUpFrame(frame: string): FollowUpChatEvent | null {
+  const lines = frame.split('\n').map((line) => line.trimEnd()).filter(Boolean);
+  let eventType = '';
+  const dataLines: string[] = [];
+  for (const line of lines) {
+    if (line.startsWith('event:')) eventType = line.slice('event:'.length).trim();
+    if (line.startsWith('data:')) dataLines.push(line.slice('data:'.length).trimStart());
+  }
+  if (!dataLines.length) return null;
+  try {
+    const payload = JSON.parse(dataLines.join('\n')) as Record<string, unknown>;
+    return normalizeFollowUpEvent(eventType || String(payload.type || ''), payload)
+      || { type: 'chat_error', message: 'Malformed follow-up chat event received.', recoverable: true };
+  } catch {
+    return { type: 'chat_error', message: 'Malformed follow-up chat event received.', recoverable: true };
+  }
+}
+
+export function parseFollowUpSseChunk(buffer: string, chunk: string): ParsedFollowUpSseResult {
+  const normalized = `${buffer}${chunk}`.replace(/\r\n/g, '\n');
+  const frames = normalized.split('\n\n');
+  const nextBuffer = frames.pop() ?? '';
+  return {
+    buffer: nextBuffer,
+    events: frames.map(parseFollowUpFrame).filter((event): event is FollowUpChatEvent => event !== null),
   };
 }

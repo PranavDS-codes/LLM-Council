@@ -8,13 +8,14 @@ from typing import Any, AsyncIterator, Callable, Optional
 
 from .llm_client import LLMClient
 from .prompts import PromptSet, load_prompt_set
-from .schemas import ArchitectBlueprint, CriticOutput
+from .schemas import ArchitectBlueprint, CriticBatchOutput
 from .settings import DEFAULT_MODEL_MAP, PERSONA, Settings, get_settings
 from .tracer import WorkflowTracer
 
 
 UsageDict = dict[str, int]
 CouncilEvent = dict[str, Any]
+SCORE_METRICS = ("accuracy", "relevance", "completeness", "clarity", "practical_usefulness")
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,63 @@ def fallback_architect_blueprint() -> dict[str, Any]:
         "tone_guidelines": "Clear, balanced, and trustworthy.",
         "missing_facts_to_add": [],
         "critique_integration": "Use only the strongest consistent claims and avoid unsupported detail.",
+    }
+
+
+def balanced_critic_batches(responses: list[dict[str, str]]) -> list[list[dict[str, str]]]:
+    """Split drafts into balanced, ordered groups of no more than three."""
+    critic_count = max(1, (len(responses) + 2) // 3)
+    base_size, remainder = divmod(len(responses), critic_count)
+    batches: list[list[dict[str, str]]] = []
+    cursor = 0
+    for index in range(critic_count):
+        size = base_size + (1 if index < remainder else 0)
+        batches.append(responses[cursor:cursor + size])
+        cursor += size
+    return batches
+
+
+def parse_critic_batch(raw: str, expected_agents: set[str]) -> dict[str, dict[str, Any]]:
+    payload = CriticBatchOutput.model_validate_json(raw)
+    reviews: dict[str, dict[str, Any]] = {}
+    for agent_name in expected_agents:
+        review = payload.reviews.get(agent_name)
+        if review is None or set(review.metric_scores) != set(SCORE_METRICS):
+            raise ValueError(f"Critic omitted a complete scorecard for {agent_name}")
+        scores = {metric: int(review.metric_scores[metric]) for metric in SCORE_METRICS}
+        if any(score < 1 or score > 10 for score in scores.values()):
+            raise ValueError(f"Critic returned an out-of-range score for {agent_name}")
+        if not review.critique.strip():
+            raise ValueError(f"Critic omitted a critique for {agent_name}")
+        reviews[agent_name] = {"metric_scores": scores, "critique": review.critique.strip()}
+    return reviews
+
+
+def aggregate_critic_reviews(
+    reviews: dict[str, dict[str, Any]],
+    responses: list[dict[str, str]],
+) -> dict[str, Any]:
+    original_order = {response["persona"]: index for index, response in enumerate(responses)}
+    scorecards = {
+        agent: {
+            **review,
+            "average": round(sum(review["metric_scores"].values()) / len(SCORE_METRICS), 2),
+        }
+        for agent, review in reviews.items()
+    }
+    rankings = sorted(
+        scorecards,
+        key=lambda agent: (-scorecards[agent]["average"], -scorecards[agent]["metric_scores"]["accuracy"], original_order[agent]),
+    )
+    finalists = rankings[:2]
+    return {
+        "winner_id": " & ".join(finalists),
+        "rankings": rankings,
+        "reasoning": "Finalists are selected deterministically by five-metric average, accuracy, then generator order.",
+        "flaws": {agent: scorecard["critique"] for agent, scorecard in scorecards.items()},
+        "scores": {agent: scorecard["average"] for agent, scorecard in scorecards.items()},
+        "scorecards": scorecards,
+        "finalists": finalists,
     }
 
 
@@ -233,58 +291,91 @@ class CouncilWorkflow:
             }
             return
 
-        critique_results: list[dict[str, Any]] = []
-        best_response_content = responses[0]["content"]
+        critic_model = self._model_for("critic", DEFAULT_MODEL_MAP["critic"], request.custom_model_map)
+        critic_batches = balanced_critic_batches(responses)
+        critic_queue: asyncio.Queue[tuple[str, int, Any]] = asyncio.Queue()
+        critic_tasks: list[asyncio.Task[None]] = []
 
-        if len(active_agents) > 1:
-            # A single critic sees every draft, so it can select one council-wide winner.
-            formatted_text = self._format_responses_for_critic(responses)
+        for batch_index, batch in enumerate(critic_batches, start=1):
+            formatted_text = self._format_responses_for_critic(batch)
             prompt = self.prompts.critic.format(query=request.query, formatted_responses=formatted_text)
-            critic_model = self._model_for("critic", DEFAULT_MODEL_MAP["critic"], request.custom_model_map)
+            yield {"type": "critic_start", "model": critic_model, "batch": batch_index, "total_batches": len(critic_batches)}
 
-            yield {"type": "critic_start", "model": critic_model, "batch": 1, "total_batches": 1}
-            started_at = time.perf_counter()
-            critic_chunks: list[str] = []
-            usage: UsageDict = {"prompt": 0, "completion": 0, "total": 0}
-            async for update in client.stream_generate(prompt, schema=CriticOutput, model=critic_model):
-                if update.delta:
-                    critic_chunks.append(update.delta)
-                    yield {"type": "critic_chunk", "chunk": update.delta}
-                if update.usage is not None:
-                    usage = update.usage
-            critic_json_str = "".join(critic_chunks)
-            duration = time.perf_counter() - started_at
-            add_usage(usage)
-            tracer.log_step("Critics", "Critic-All-Responses", prompt, critic_json_str)
+            async def pump_critic(
+                index: int = batch_index,
+                critic_prompt: str = prompt,
+                critic_batch: list[dict[str, str]] = batch,
+            ) -> None:
+                chunks: list[str] = []
+                usage: UsageDict = {"prompt": 0, "completion": 0, "total": 0}
+                started = time.perf_counter()
+                try:
+                    async for update in client.stream_generate(critic_prompt, schema=CriticBatchOutput, model=critic_model):
+                        if update.delta:
+                            chunks.append(update.delta)
+                            await critic_queue.put(("chunk", index, update.delta))
+                        if update.usage is not None:
+                            usage = update.usage
+                    await critic_queue.put(("done", index, (critic_batch, critic_prompt, "".join(chunks), usage, started)))
+                except Exception as exc:  # pragma: no cover - defensive async boundary
+                    await critic_queue.put(("error", index, exc))
 
-            try:
-                critic_data = json.loads(critic_json_str)
-            except json.JSONDecodeError:
-                yield {
-                    "type": "error",
-                    "message": "Critic returned invalid JSON. Falling back to the first response.",
-                    "phase": "critic",
-                    "recoverable": True,
-                }
-            else:
-                critic_data["time_taken"] = duration
-                critic_data["model"] = critic_model
-                critic_data["usage"] = usage
-                critique_results.append(critic_data)
-                best_response_content = self._winner_content(responses, critic_data.get("winner_id", ""))
-                yield {"type": "critic_result", **critic_data}
-            yield {"type": "critic_done"}
-        else:
-            auto_win = build_auto_win(active_agents[0]["name"])
-            critique_results.append(auto_win)
-            tracer.log_step("Critics", "Auto-Critic", "Single Agent", json.dumps(auto_win))
-            yield {"type": "critic_result", **auto_win}
-            yield {"type": "critic_done"}
+            critic_tasks.append(asyncio.create_task(pump_critic()))
+
+        collected_reviews: dict[str, dict[str, Any]] = {}
+        critic_usage: UsageDict = {"prompt": 0, "completion": 0, "total": 0}
+        critic_time = 0.0
+        unfinished_critics = len(critic_tasks)
+        try:
+            while unfinished_critics:
+                event_type, batch_index, payload = await critic_queue.get()
+                if event_type == "chunk":
+                    yield {"type": "critic_chunk", "batch": batch_index, "chunk": payload}
+                    continue
+                if event_type == "error":
+                    yield {"type": "error", "message": f"Critic {batch_index} failed: {payload}", "phase": "critic", "recoverable": True}
+                    unfinished_critics -= 1
+                    continue
+
+                batch, prompt, critic_json, usage, started = payload
+                duration = time.perf_counter() - started
+                critic_time += duration
+                add_usage(usage)
+                for key in critic_usage:
+                    critic_usage[key] += usage.get(key, 0)
+                tracer.log_step("Critics", f"Critic-Batch-{batch_index}", prompt, critic_json)
+                try:
+                    collected_reviews.update(parse_critic_batch(critic_json, {item["persona"] for item in batch}))
+                except (ValueError, TypeError) as exc:
+                    yield {"type": "error", "message": f"Critic {batch_index} returned invalid scorecards: {exc}", "phase": "critic", "recoverable": True}
+                unfinished_critics -= 1
+        except asyncio.CancelledError:
+            for task in critic_tasks:
+                task.cancel()
+            await asyncio.gather(*critic_tasks, return_exceptions=True)
+            raise
+
+        critic_data = aggregate_critic_reviews(collected_reviews, responses)
+        finalists = critic_data["finalists"]
+        if not finalists:
+            finalists = [response["persona"] for response in responses[:2]]
+            critic_data["finalists"] = finalists
+            critic_data["winner_id"] = " & ".join(finalists)
+            critic_data["reasoning"] = "No critic batch produced valid scorecards; finalists use generator order as a safe fallback."
+            yield {"type": "error", "message": "No valid critic scorecards were available; using the first drafts as finalists.", "phase": "critic", "recoverable": True}
+        critic_data["time_taken"] = critic_time
+        critic_data["model"] = critic_model
+        critic_data["usage"] = critic_usage
+        yield {"type": "critic_result", **critic_data}
+        yield {"type": "critic_done"}
+
+        finalist_responses = [response for response in responses if response["persona"] in finalists]
+        finalist_context = self._format_finalists(finalist_responses, critic_data.get("scorecards", {}))
 
         architect_prompt = self.prompts.architect.format(
             query=request.query,
-            best_response=best_response_content,
-            critiques=json.dumps(critique_results) if critique_results else "[]",
+            finalist_responses=finalist_context,
+            critiques=json.dumps(critic_data),
         )
         architect_model = self._model_for("architect", DEFAULT_MODEL_MAP["architect"], request.custom_model_map)
         yield {"type": "architect_start", "model": architect_model}
@@ -322,7 +413,7 @@ class CouncilWorkflow:
         finalizer_prompt = self.prompts.finalizer.format(
             query=request.query,
             blueprint=architect_raw,
-            context=best_response_content,
+            context=finalist_context,
         )
         finalizer_model = self._model_for("finalizer", DEFAULT_MODEL_MAP["finalizer"], request.custom_model_map)
         yield {"type": "finalizer_start", "model": finalizer_model}
@@ -363,6 +454,21 @@ class CouncilWorkflow:
         formatted = []
         for response in responses:
             formatted.append(f"--- RESPONSE ID: {response['persona']} ---\n{response['content']}\n")
+        return "\n".join(formatted)
+
+    @staticmethod
+    def _format_finalists(
+        responses: list[dict[str, str]],
+        scorecards: dict[str, dict[str, Any]],
+    ) -> str:
+        formatted = []
+        for response in responses:
+            agent = response["persona"]
+            formatted.append(
+                f"--- FINALIST: {agent} ---\n"
+                f"SCORECARD: {json.dumps(scorecards.get(agent, {}))}\n"
+                f"DRAFT:\n{response['content']}\n"
+            )
         return "\n".join(formatted)
 
     @staticmethod

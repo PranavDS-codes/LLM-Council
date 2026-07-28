@@ -23,6 +23,26 @@ export interface MetricData {
   usage: MetricUsage;
 }
 
+export type FollowUpModel = 'openai/gpt-oss-20b' | 'openai/gpt-oss-120b';
+export type FollowUpMessageStatus = 'streaming' | 'completed' | 'stopped' | 'error';
+
+export interface FollowUpMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  reasoning: string;
+  timestamp: number;
+  model?: FollowUpModel;
+  status?: FollowUpMessageStatus;
+  usage?: MetricUsage;
+  error?: string;
+}
+
+export interface FollowUpChat {
+  selectedModel: FollowUpModel;
+  messages: FollowUpMessage[];
+}
+
 export interface SessionIssue {
   id: string;
   message: string;
@@ -41,6 +61,14 @@ export interface CriticData {
   time_taken?: number;
   model?: string;
   usage?: MetricUsage;
+  scorecards?: Record<string, CriticScorecard>;
+  finalists?: string[];
+}
+
+export interface CriticScorecard {
+  metric_scores: Record<string, number>;
+  average: number;
+  critique: string;
 }
 
 export interface ArchitectData {
@@ -83,6 +111,7 @@ export interface CouncilSession {
   architectData: ArchitectData | null;
   finalizerModel: string | null;
   finalizerText: string;
+  followUpChat: FollowUpChat;
   issues: SessionIssue[];
   metrics: CouncilMetrics;
 }
@@ -173,6 +202,35 @@ export interface ErrorEvent extends BaseCouncilEvent {
   agent?: string;
   recoverable?: boolean;
 }
+
+export interface ChatStartEvent extends BaseCouncilEvent {
+  type: 'chat_start';
+  model: FollowUpModel;
+}
+
+export interface ChatReasoningChunkEvent extends BaseCouncilEvent {
+  type: 'chat_reasoning_chunk';
+  chunk: string;
+}
+
+export interface ChatContentChunkEvent extends BaseCouncilEvent {
+  type: 'chat_content_chunk';
+  chunk: string;
+}
+
+export interface ChatDoneEvent extends BaseCouncilEvent {
+  type: 'chat_done';
+  model: FollowUpModel;
+  usage: MetricUsage;
+}
+
+export interface ChatErrorEvent extends BaseCouncilEvent {
+  type: 'chat_error';
+  message: string;
+  recoverable: boolean;
+}
+
+export type FollowUpChatEvent = ChatStartEvent | ChatReasoningChunkEvent | ChatContentChunkEvent | ChatDoneEvent | ChatErrorEvent;
 
 export type CouncilEvent =
   | GeneratorStartEvent

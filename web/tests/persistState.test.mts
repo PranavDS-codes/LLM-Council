@@ -116,3 +116,11 @@ test('agent drafts survive hydration without replacing the applied registry', ()
   assert.equal(merged.agentRegistry[0]?.name, 'Saved');
   assert.equal(merged.agentDraft[0]?.name, 'Draft');
 });
+
+test('legacy sessions receive an empty persisted follow-up chat', () => {
+  const merged = mergePersistedCouncilState({
+    sessions: [{ id: 'legacy-chat', query: 'Keep history', finalizerText: 'Final report' }],
+  }, currentState);
+  assert.equal(merged.sessions[0]?.followUpChat.selectedModel, 'openai/gpt-oss-20b');
+  assert.deepEqual(merged.sessions[0]?.followUpChat.messages, []);
+});

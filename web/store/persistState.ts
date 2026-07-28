@@ -1,4 +1,4 @@
-import type { Agent, AgentRegistryEntry, CouncilMetrics, CouncilSession, MetricData, MetricUsage, SessionIssue, SessionStatus } from './types';
+import type { Agent, AgentRegistryEntry, CouncilMetrics, CouncilSession, FollowUpChat, FollowUpMessage, FollowUpModel, MetricData, MetricUsage, SessionIssue, SessionStatus } from './types';
 
 const LEGACY_AGENT_REGISTRY: AgentRegistryEntry[] = [
   ['The Academic', 'You are a rigorous researcher. Focus on definitions, historical context, theoretical frameworks, and first principles. Cite logical fallacies if present. Use formal, precise language. Prioritize accuracy and depth over simplicity.'],
@@ -196,6 +196,36 @@ function sanitizeStatus(value: unknown): SessionStatus {
     : 'completed';
 }
 
+function sanitizeFollowUpModel(value: unknown): FollowUpModel {
+  return value === 'openai/gpt-oss-120b' ? value : 'openai/gpt-oss-20b';
+}
+
+function sanitizeFollowUpChat(value: unknown): FollowUpChat {
+  if (!isRecord(value)) {
+    return { selectedModel: 'openai/gpt-oss-20b', messages: [] };
+  }
+  const messages = Array.isArray(value.messages)
+    ? value.messages.flatMap((message): FollowUpMessage[] => {
+        if (!isRecord(message) || (message.role !== 'user' && message.role !== 'assistant') || typeof message.content !== 'string') return [];
+        return [{
+          id: typeof message.id === 'string' ? message.id : crypto.randomUUID(),
+          role: message.role,
+          content: message.content,
+          reasoning: typeof message.reasoning === 'string' ? message.reasoning : '',
+          timestamp: Number(message.timestamp || 0),
+          model: message.role === 'assistant' ? sanitizeFollowUpModel(message.model) : undefined,
+          status: message.status === 'streaming' || message.status === 'completed' || message.status === 'stopped' || message.status === 'error'
+            ? message.status
+            : message.role === 'assistant' ? 'completed' : undefined,
+          usage: sanitizeUsage(message.usage),
+          error: typeof message.error === 'string' ? message.error : undefined,
+        }];
+      })
+    : [];
+
+  return { selectedModel: sanitizeFollowUpModel(value.selectedModel), messages };
+}
+
 function sanitizeSession(value: unknown): CouncilSession | null {
   if (!isRecord(value) || typeof value.id !== 'string' || typeof value.query !== 'string') {
     return null;
@@ -240,6 +270,7 @@ function sanitizeSession(value: unknown): CouncilSession | null {
     architectData,
     finalizerModel: typeof value.finalizerModel === 'string' ? value.finalizerModel : null,
     finalizerText,
+    followUpChat: sanitizeFollowUpChat(value.followUpChat),
     issues: sanitizeIssues(value.issues),
     metrics: sanitizeMetrics(value.metrics),
   };

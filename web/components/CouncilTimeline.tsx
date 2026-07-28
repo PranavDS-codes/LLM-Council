@@ -9,6 +9,7 @@ import type { Agent } from '@/store/types';
 import { PhaseArchitect } from './PhaseArchitect';
 import { PhaseCritic } from './PhaseCritic';
 import { PhaseFinalizer } from './PhaseFinalizer';
+import { PhaseFollowUpChat } from './PhaseFollowUpChat';
 import { PhaseGenerator } from './PhaseGenerator';
 
 export function CouncilTimeline() {
@@ -170,6 +171,7 @@ export function CouncilTimeline() {
               <TokenTotal label="Total Tokens" value={currentSession.metrics.totalTokens?.total || 0} />
             </div>
           )}
+          {currentSession.status === 'completed' && currentSession.finalizerText.trim() && <PhaseFollowUpChat />}
         </div>
       )}
     </div>

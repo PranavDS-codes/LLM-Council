@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator, Literal, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -64,6 +64,34 @@ class CheckCredentialsRequest(BaseModel):
     api_key: str
 
 
+FOLLOW_UP_MODELS = {"openai/gpt-oss-20b", "openai/gpt-oss-120b"}
+
+
+class FollowUpMessageRequest(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1)
+
+
+class FollowUpChatRequest(BaseModel):
+    final_report: str = Field(min_length=1)
+    messages: list[FollowUpMessageRequest]
+    model: str
+    custom_api_key: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_conversation(self) -> "FollowUpChatRequest":
+        if self.model not in FOLLOW_UP_MODELS:
+            raise ValueError("Follow-up chat supports only openai/gpt-oss-20b and openai/gpt-oss-120b")
+        if not self.messages or self.messages[-1].role != "user":
+            raise ValueError("Follow-up chat must end with a user message")
+        expected_role = "user"
+        for message in self.messages:
+            if message.role != expected_role:
+                raise ValueError("Follow-up messages must alternate between user and assistant")
+            expected_role = "assistant" if expected_role == "user" else "user"
+        return self
+
+
 def format_sse(event_type: str, data: dict[str, Any]) -> str:
     payload = dict(data)
     payload["type"] = event_type
@@ -84,6 +112,36 @@ async def stream_workflow(request: SummonRequest) -> AsyncIterator[str]:
         yield format_sse(event_type, event)
 
 
+async def stream_follow_up_chat(request: FollowUpChatRequest) -> AsyncIterator[str]:
+    """Stream a report-grounded conversation without exposing council internals as context."""
+    client = LLMClient(api_key=request.custom_api_key, settings=settings)
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are the council follow-up assistant. Answer using the final synthesized "
+                "report below as your only council-source material. Do not claim access to "
+                "generator drafts, peer reviews, scores, or the blueprint. If the report does "
+                "not support an answer, say so clearly.\n\n"
+                "FINAL SYNTHESIZED REPORT:\n"
+                f"{request.final_report}"
+            ),
+        },
+        *[message.model_dump() for message in request.messages],
+    ]
+    yield format_sse("chat_start", {"model": request.model})
+    try:
+        async for update in client.stream_chat(messages, model=request.model, reasoning_effort="medium"):
+            if update.reasoning:
+                yield format_sse("chat_reasoning_chunk", {"chunk": update.reasoning})
+            if update.delta:
+                yield format_sse("chat_content_chunk", {"chunk": update.delta})
+            if update.usage is not None:
+                yield format_sse("chat_done", {"model": request.model, "usage": update.usage})
+    except Exception as exc:
+        yield format_sse("chat_error", {"message": str(exc), "recoverable": True})
+
+
 @app.get("/health")
 async def health_check() -> dict[str, str]:
     return {"status": "ok"}
@@ -92,6 +150,11 @@ async def health_check() -> dict[str, str]:
 @app.post("/api/summon")
 async def summon(request: SummonRequest) -> StreamingResponse:
     return StreamingResponse(stream_workflow(request), media_type="text/event-stream")
+
+
+@app.post("/api/follow-up-chat")
+async def follow_up_chat(request: FollowUpChatRequest) -> StreamingResponse:
+    return StreamingResponse(stream_follow_up_chat(request), media_type="text/event-stream")
 
 
 @app.get("/api/config-defaults")

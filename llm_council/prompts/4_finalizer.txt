@@ -12,7 +12,7 @@ You must strictly follow the "Architect's Blueprint" provided below. Do not devi
 **2. Architect's Blueprint (The Plan):**
 {blueprint}
 
-**3. Reference Material (The Best Content):**
+**3. Finalist Reference Material, Scorecards, and Critiques:**
 {context}
 
 ### INSTRUCTIONS

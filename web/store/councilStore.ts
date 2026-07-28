@@ -6,9 +6,9 @@ import { DEFAULT_AGENT_REGISTRY } from '@/lib/defaultAgents';
 
 import { cleanModelOverrides } from './configState';
 import { mergePersistedCouncilState } from './persistState';
-import { parseSseChunk } from './sse';
-import { applyCouncilEvent, createSession, deriveLoadPhase, stopSessionState } from './sessionState';
-import type { Agent, AgentRegistryEntry, CouncilSession } from './types';
+import { parseFollowUpSseChunk, parseSseChunk } from './sse';
+import { applyCouncilEvent, applyFollowUpChatEvent, createSession, deriveLoadPhase, stopFollowUpChatState, stopSessionState } from './sessionState';
+import type { Agent, AgentRegistryEntry, CouncilSession, FollowUpModel } from './types';
 
 const selectAllAgents = (registry: AgentRegistryEntry[]): Agent[] => registry.map(({ id, name }) => ({ id, name, selected: true }));
 
@@ -19,6 +19,9 @@ export interface CouncilState {
   agentDraft: AgentRegistryEntry[];
   isStreaming: boolean;
   abortController: AbortController | null;
+  isFollowUpStreaming: boolean;
+  followUpAbortController: AbortController | null;
+  followUpSessionId: string | null;
   theme: 'dark' | 'light';
   settings: {
     apiKey: string;
@@ -39,6 +42,9 @@ export interface CouncilState {
   stopSession: () => void;
   loadSession: (sessionId: string) => void;
   deleteSession: (id: string) => void;
+  setFollowUpModel: (model: FollowUpModel) => void;
+  sendFollowUpMessage: (message: string) => Promise<void>;
+  stopFollowUpMessage: () => void;
 }
 
 function updateSession(
@@ -58,6 +64,9 @@ export const useCouncilStore = create<CouncilState>()(
       agentDraft: DEFAULT_AGENT_REGISTRY,
       isStreaming: false,
       abortController: null,
+      isFollowUpStreaming: false,
+      followUpAbortController: null,
+      followUpSessionId: null,
       theme: 'dark',
       settings: {
         apiKey: '',
@@ -145,6 +154,97 @@ export const useCouncilStore = create<CouncilState>()(
           abortController: null,
           sessions: updateSession(state.sessions, currentSessionId, stopSessionState),
         }));
+      },
+      setFollowUpModel: (model) => {
+        const sessionId = get().currentSessionId;
+        if (!sessionId) return;
+        set((state) => ({
+          sessions: updateSession(state.sessions, sessionId, (session) => ({
+            ...session,
+            followUpChat: { ...session.followUpChat, selectedModel: model },
+          })),
+        }));
+      },
+      stopFollowUpMessage: () => {
+        const { followUpAbortController, isFollowUpStreaming, followUpSessionId } = get();
+        if (!isFollowUpStreaming || !followUpAbortController || !followUpSessionId) return;
+        followUpAbortController.abort();
+        set((state) => ({
+          isFollowUpStreaming: false,
+          followUpAbortController: null,
+          followUpSessionId: null,
+          sessions: updateSession(state.sessions, followUpSessionId, stopFollowUpChatState),
+        }));
+      },
+      sendFollowUpMessage: async (message) => {
+        const state = get();
+        const sessionId = state.currentSessionId;
+        const session = state.sessions.find((candidate) => candidate.id === sessionId);
+        const content = message.trim();
+        if (!sessionId || !session || state.isFollowUpStreaming || session.status !== 'completed' || !session.finalizerText.trim() || !content) return;
+
+        const controller = new AbortController();
+        const userMessage = { id: crypto.randomUUID(), role: 'user' as const, content, reasoning: '', timestamp: Date.now() };
+        const assistantMessage = {
+          id: crypto.randomUUID(), role: 'assistant' as const, content: '', reasoning: '', timestamp: Date.now(),
+          model: session.followUpChat.selectedModel, status: 'streaming' as const,
+        };
+        const history: { role: 'user' | 'assistant'; content: string }[] = [];
+        let pendingUser: { role: 'user'; content: string } | null = null;
+        for (const entry of session.followUpChat.messages) {
+          if (entry.role === 'user') {
+            pendingUser = entry.content.trim() ? { role: 'user', content: entry.content } : null;
+          } else if (pendingUser && entry.content.trim()) {
+            history.push(pendingUser, { role: 'assistant', content: entry.content });
+            pendingUser = null;
+          }
+        }
+        history.push({ role: 'user', content: userMessage.content });
+
+        set((currentState) => ({
+          isFollowUpStreaming: true,
+          followUpAbortController: controller,
+          followUpSessionId: sessionId,
+          sessions: updateSession(currentState.sessions, sessionId, (currentSession) => ({
+            ...currentSession,
+            followUpChat: { ...currentSession.followUpChat, messages: [...currentSession.followUpChat.messages, userMessage, assistantMessage] },
+          })),
+        }));
+
+        try {
+          const response = await fetch(getApiUrl('/api/follow-up-chat'), {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ final_report: session.finalizerText, messages: history, model: session.followUpChat.selectedModel, custom_api_key: state.settings.apiKey || undefined }),
+            signal: controller.signal,
+          });
+          if (!response.ok) throw new Error(`Request failed with status ${response.status}`);
+          if (!response.body) throw new Error('No response body was returned by the backend.');
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          while (true) {
+            const { done, value } = await reader.read();
+            const parsed = parseFollowUpSseChunk(buffer, done ? '\n\n' : decoder.decode(value, { stream: true }));
+            buffer = parsed.buffer;
+            if (parsed.events.length) {
+              set((currentState) => ({
+                sessions: updateSession(currentState.sessions, sessionId, (currentSession) => parsed.events.reduce(applyFollowUpChatEvent, currentSession)),
+              }));
+            }
+            if (done) break;
+          }
+        } catch (error) {
+          if ((error as Error).name !== 'AbortError') {
+            set((currentState) => ({
+              sessions: updateSession(currentState.sessions, sessionId, (currentSession) => applyFollowUpChatEvent(currentSession, {
+                type: 'chat_error', message: (error as Error).message || 'The follow-up stream ended unexpectedly.', recoverable: true,
+              })),
+            }));
+          }
+        } finally {
+          if (get().followUpAbortController === controller) set({ isFollowUpStreaming: false, followUpAbortController: null, followUpSessionId: null });
+        }
       },
       startSession: async () => {
         const state = get();

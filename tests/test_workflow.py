@@ -8,7 +8,7 @@ from pathlib import Path
 
 from llm_council.prompts import load_prompt_set
 from llm_council.settings import get_settings
-from llm_council.workflow import CouncilWorkflow, WorkflowRequest, select_active_agents
+from llm_council.workflow import CouncilWorkflow, WorkflowRequest, aggregate_critic_reviews, balanced_critic_batches, select_active_agents
 
 
 class FakeClient:
@@ -69,6 +69,7 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         fake_client = FakeClient(
             [
                 ("Draft from The Academic", {"prompt": 10, "completion": 5, "total": 15}),
+                (json.dumps({"reviews": {"The Academic": {"metric_scores": {"accuracy": 9, "relevance": 9, "completeness": 9, "clarity": 9, "practical_usefulness": 9}, "critique": "Strong."}}}), {"prompt": 2, "completion": 2, "total": 4}),
                 (
                     json.dumps(
                         {
@@ -112,6 +113,7 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
 
         fake_client = RecordingClient([
             ("Custom draft", {"prompt": 1, "completion": 1, "total": 2}),
+            (json.dumps({"reviews": {"Custom Agent": {"metric_scores": {"accuracy": 9, "relevance": 9, "completeness": 9, "clarity": 9, "practical_usefulness": 9}, "critique": "Strong."}}}), {"prompt": 1, "completion": 1, "total": 2}),
             (json.dumps({"structure": ["Intro"], "tone_guidelines": "Clear", "missing_facts_to_add": [], "critique_integration": "Use it."}), {"prompt": 1, "completion": 1, "total": 2}),
             ("Final", {"prompt": 1, "completion": 1, "total": 2}),
         ])
@@ -126,6 +128,19 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake_client.calls[0][1]["model"], "model/custom")
         self.assertNotIn("max_tokens", fake_client.calls[0][1])
         self.assertEqual(fake_client.calls[0][1]["reasoning_effort"], "low")
+        self.assertIn("SCORECARD", fake_client.calls[2][0][0])
+        self.assertIn("SCORECARD", fake_client.calls[3][0][0])
+
+    async def test_critic_batches_balance_and_rank_finalists_deterministically(self):
+        responses = [{"persona": f"Agent {index}", "content": "draft"} for index in range(5)]
+        self.assertEqual([len(batch) for batch in balanced_critic_batches(responses)], [3, 2])
+        reviews = {
+            "Agent 0": {"metric_scores": {"accuracy": 8, "relevance": 8, "completeness": 8, "clarity": 8, "practical_usefulness": 8}, "critique": "A"},
+            "Agent 1": {"metric_scores": {"accuracy": 9, "relevance": 8, "completeness": 8, "clarity": 8, "practical_usefulness": 7}, "critique": "B"},
+            "Agent 2": {"metric_scores": {"accuracy": 8, "relevance": 8, "completeness": 8, "clarity": 8, "practical_usefulness": 8}, "critique": "C"},
+        }
+        result = aggregate_critic_reviews(reviews, responses)
+        self.assertEqual(result["finalists"], ["Agent 1", "Agent 0"])
 
     async def test_generator_failure_emits_error(self):
         fake_client = FakeClient([RuntimeError("boom")])

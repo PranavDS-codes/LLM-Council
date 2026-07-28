@@ -169,12 +169,28 @@ async def health_check() -> dict[str, str]:
 
 @app.post("/api/summon")
 async def summon(request: SummonRequest) -> StreamingResponse:
-    return StreamingResponse(stream_workflow(request), media_type="text/event-stream")
+    return StreamingResponse(
+        stream_workflow(request),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post("/api/follow-up-chat")
 async def follow_up_chat(request: FollowUpChatRequest) -> StreamingResponse:
-    return StreamingResponse(stream_follow_up_chat(request), media_type="text/event-stream")
+    return StreamingResponse(
+        stream_follow_up_chat(request),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/api/config-defaults")

@@ -102,15 +102,19 @@ export interface CouncilSession {
   activePhase: CouncilPhase;
   status: SessionStatus;
   generatorStreams: Record<string, string>;
+  generatorThinking: Record<string, string>;
   agentModels: Record<string, string>;
   criticStream: string;
   criticProgress: { batch: number; totalBatches: number; model: string } | null;
+  criticThinking: Record<number, string>;
   criticData: CriticData | null;
   architectStream: string;
+  architectThinking: string;
   architectModel: string | null;
   architectData: ArchitectData | null;
   finalizerModel: string | null;
   finalizerText: string;
+  finalizerThinking: string;
   followUpChat: FollowUpChat;
   issues: SessionIssue[];
   metrics: CouncilMetrics;
@@ -138,6 +142,17 @@ export interface GeneratorDoneEvent extends BaseCouncilEvent {
   usage: MetricUsage;
 }
 
+export interface GeneratorThinkingEvent extends BaseCouncilEvent {
+  type: 'generator_thinking';
+  agent: string;
+  chunk: string;
+}
+
+export interface GeneratorThinkingDoneEvent extends BaseCouncilEvent {
+  type: 'generator_thinking_done';
+  agent: string;
+}
+
 export interface CriticResultEvent extends CriticData {
   type: 'critic_result';
 }
@@ -158,6 +173,17 @@ export interface CriticDoneEvent extends BaseCouncilEvent {
   type: 'critic_done';
 }
 
+export interface CriticThinkingEvent extends BaseCouncilEvent {
+  type: 'critic_thinking';
+  batch: number;
+  chunk: string;
+}
+
+export interface CriticThinkingDoneEvent extends BaseCouncilEvent {
+  type: 'critic_thinking_done';
+  batch: number;
+}
+
 export interface ArchitectResultEvent extends ArchitectData {
   type: 'architect_result';
 }
@@ -172,6 +198,15 @@ export interface ArchitectChunkEvent extends BaseCouncilEvent {
   chunk: string;
 }
 
+export interface ArchitectThinkingEvent extends BaseCouncilEvent {
+  type: 'architect_thinking';
+  chunk: string;
+}
+
+export interface ArchitectThinkingDoneEvent extends BaseCouncilEvent {
+  type: 'architect_thinking_done';
+}
+
 export interface FinalizerStartEvent extends BaseCouncilEvent {
   type: 'finalizer_start';
   model: string;
@@ -180,6 +215,15 @@ export interface FinalizerStartEvent extends BaseCouncilEvent {
 export interface FinalizerChunkEvent extends BaseCouncilEvent {
   type: 'finalizer_chunk';
   chunk: string;
+}
+
+export interface FinalizerThinkingEvent extends BaseCouncilEvent {
+  type: 'finalizer_thinking';
+  chunk: string;
+}
+
+export interface FinalizerThinkingDoneEvent extends BaseCouncilEvent {
+  type: 'finalizer_thinking_done';
 }
 
 export interface FinalizerDoneEvent extends BaseCouncilEvent {
@@ -236,15 +280,23 @@ export type CouncilEvent =
   | GeneratorStartEvent
   | GeneratorChunkEvent
   | GeneratorDoneEvent
+  | GeneratorThinkingEvent
+  | GeneratorThinkingDoneEvent
   | CriticStartEvent
   | CriticChunkEvent
   | CriticDoneEvent
+  | CriticThinkingEvent
+  | CriticThinkingDoneEvent
   | CriticResultEvent
   | ArchitectStartEvent
   | ArchitectChunkEvent
+  | ArchitectThinkingEvent
+  | ArchitectThinkingDoneEvent
   | ArchitectResultEvent
   | FinalizerStartEvent
   | FinalizerChunkEvent
+  | FinalizerThinkingEvent
+  | FinalizerThinkingDoneEvent
   | FinalizerDoneEvent
   | DoneEvent
   | ErrorEvent;

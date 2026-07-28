@@ -1,19 +1,27 @@
 import type {
   ArchitectResultEvent,
   ArchitectStartEvent,
+  ArchitectThinkingDoneEvent,
+  ArchitectThinkingEvent,
   CouncilEvent,
   CriticStartEvent,
+  CriticThinkingDoneEvent,
+  CriticThinkingEvent,
   CriticResultEvent,
   DoneEvent,
   ErrorEvent,
   FinalizerDoneEvent,
   FinalizerStartEvent,
+  FinalizerThinkingDoneEvent,
+  FinalizerThinkingEvent,
   FollowUpChatEvent,
   ChatDoneEvent,
   ChatErrorEvent,
   ChatStartEvent,
   GeneratorDoneEvent,
   GeneratorStartEvent,
+  GeneratorThinkingDoneEvent,
+  GeneratorThinkingEvent,
   MetricUsage,
 } from './types';
 
@@ -65,6 +73,14 @@ function normalizeEvent(type: string, payload: Record<string, unknown>): Council
       }
       return null;
 
+    case 'generator_thinking':
+      return typeof payload.agent === 'string' && typeof payload.chunk === 'string'
+        ? { type, agent: payload.agent, chunk: payload.chunk } satisfies GeneratorThinkingEvent
+        : null;
+
+    case 'generator_thinking_done':
+      return typeof payload.agent === 'string' ? { type, agent: payload.agent } satisfies GeneratorThinkingDoneEvent : null;
+
     case 'critic_result':
       return {
         type,
@@ -106,6 +122,14 @@ function normalizeEvent(type: string, payload: Record<string, unknown>): Council
     case 'critic_done':
       return { type };
 
+    case 'critic_thinking':
+      return typeof payload.chunk === 'string'
+        ? { type, batch: Number(payload.batch || 1), chunk: payload.chunk } satisfies CriticThinkingEvent
+        : null;
+
+    case 'critic_thinking_done':
+      return { type, batch: Number(payload.batch || 1) } satisfies CriticThinkingDoneEvent;
+
     case 'architect_result':
       return {
         type,
@@ -128,6 +152,12 @@ function normalizeEvent(type: string, payload: Record<string, unknown>): Council
     case 'architect_chunk':
       return typeof payload.chunk === 'string' ? { type, chunk: payload.chunk } : null;
 
+    case 'architect_thinking':
+      return typeof payload.chunk === 'string' ? { type, chunk: payload.chunk } satisfies ArchitectThinkingEvent : null;
+
+    case 'architect_thinking_done':
+      return { type } satisfies ArchitectThinkingDoneEvent;
+
     case 'finalizer_start':
       return typeof payload.model === 'string' ? { type, model: payload.model } satisfies FinalizerStartEvent : null;
 
@@ -136,6 +166,12 @@ function normalizeEvent(type: string, payload: Record<string, unknown>): Council
         return { type, chunk: payload.chunk };
       }
       return null;
+
+    case 'finalizer_thinking':
+      return typeof payload.chunk === 'string' ? { type, chunk: payload.chunk } satisfies FinalizerThinkingEvent : null;
+
+    case 'finalizer_thinking_done':
+      return { type } satisfies FinalizerThinkingDoneEvent;
 
     case 'finalizer_done':
       return {

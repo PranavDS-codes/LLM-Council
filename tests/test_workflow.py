@@ -145,6 +145,36 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         result = aggregate_critic_reviews(reviews, responses)
         self.assertEqual(result["finalists"], ["Agent 1", "Agent 0"])
 
+    async def test_critic_batches_start_in_parallel(self):
+        class ParallelCriticClient(FakeClient):
+            def __init__(self):
+                super().__init__([])
+                self.critic_starts = 0
+                self.all_critics_started = asyncio.Event()
+
+            async def stream_generate(self, prompt, *args, **kwargs):
+                if "Senior Quality Assurance Judge" in prompt:
+                    self.critic_starts += 1
+                    if self.critic_starts == 2:
+                        self.all_critics_started.set()
+                    await asyncio.wait_for(self.all_critics_started.wait(), timeout=0.2)
+                    agents = [line.split("--- RESPONSE ID: ")[1].split(" ---")[0] for line in prompt.splitlines() if line.startswith("--- RESPONSE ID:")]
+                    content = json.dumps({"reviews": {agent: {"metric_scores": {"accuracy": 8, "relevance": 8, "completeness": 8, "clarity": 8, "practical_usefulness": 8}, "critique": "Solid."} for agent in agents}})
+                elif "Chief Solutions Architect" in prompt:
+                    content = json.dumps({"structure": ["Answer"], "tone_guidelines": "Clear", "missing_facts_to_add": [], "critique_integration": "Use the finalists."})
+                elif "You are the Finalizer" in prompt:
+                    content = "Final answer"
+                else:
+                    content = "Draft"
+                yield type("Update", (), {"delta": content, "usage": None})()
+                yield type("Update", (), {"delta": "", "usage": {"prompt": 1, "completion": 1, "total": 2}})()
+
+        client = ParallelCriticClient()
+        workflow = CouncilWorkflow(settings=get_settings(), client_factory=lambda **kwargs: client)
+        events = [event async for event in workflow.stream(WorkflowRequest(query="Test", selected_agents=["The Academic", "The Layman", "The Skeptic", "The Futurist"]))]
+        self.assertEqual(client.critic_starts, 2)
+        self.assertTrue(any(event["type"] == "critic_result" for event in events))
+
     async def test_generator_failure_emits_error(self):
         fake_client = FakeClient([RuntimeError("boom")])
         workflow = CouncilWorkflow(

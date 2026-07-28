@@ -222,7 +222,11 @@ class CouncilWorkflow:
                         model=model,
                         # Keep internal reasoning economical without imposing an output ceiling.
                         reasoning_effort="low",
+                        include_reasoning=True,
                     ):
+                        reasoning = getattr(update, "reasoning", "")
+                        if reasoning:
+                            await generator_queue.put(("thinking", name, reasoning))
                         if update.delta:
                             content += update.delta
                             await generator_queue.put(("chunk", name, update.delta))
@@ -230,8 +234,10 @@ class CouncilWorkflow:
                             usage = update.usage
                     if not content.strip():
                         raise RuntimeError("The model completed without visible answer text. Try running this agent again.")
+                    await generator_queue.put(("thinking_done", name, None))
                     await generator_queue.put(("done", name, (content, usage, model, started)))
                 except Exception as exc:  # pragma: no cover - defensive async boundary
+                    await generator_queue.put(("thinking_done", name, None))
                     await generator_queue.put(("error", name, exc))
 
             generator_tasks.append(asyncio.create_task(pump_generator()))
@@ -242,6 +248,10 @@ class CouncilWorkflow:
                 event_type, agent_name, payload = await generator_queue.get()
                 if event_type == "chunk":
                     yield {"type": "generator_chunk", "agent": agent_name, "chunk": payload}
+                elif event_type == "thinking":
+                    yield {"type": "generator_thinking", "agent": agent_name, "chunk": payload}
+                elif event_type == "thinking_done":
+                    yield {"type": "generator_thinking_done", "agent": agent_name}
                 elif event_type == "done":
                     response_content, usage, model_id, started_at = payload
                     duration = time.perf_counter() - started_at
@@ -315,7 +325,11 @@ class CouncilWorkflow:
                         schema=CriticBatchOutput,
                         model=critic_model,
                         reasoning_effort="low",
+                        include_reasoning=True,
                     ):
+                        reasoning = getattr(update, "reasoning", "")
+                        if reasoning:
+                            await critic_queue.put(("thinking", index, reasoning))
                         if update.delta:
                             chunks.append(update.delta)
                             await critic_queue.put(("chunk", index, update.delta))
@@ -337,8 +351,12 @@ class CouncilWorkflow:
                 if event_type == "chunk":
                     yield {"type": "critic_chunk", "batch": batch_index, "chunk": payload}
                     continue
+                if event_type == "thinking":
+                    yield {"type": "critic_thinking", "batch": batch_index, "chunk": payload}
+                    continue
                 if event_type == "error":
                     yield {"type": "error", "message": f"Critic {batch_index} failed: {payload}", "phase": "critic", "recoverable": True}
+                    yield {"type": "critic_thinking_done", "batch": batch_index}
                     unfinished_critics -= 1
                     continue
 
@@ -353,6 +371,7 @@ class CouncilWorkflow:
                     collected_reviews.update(parse_critic_batch(critic_json, {item["persona"] for item in batch}))
                 except (ValueError, TypeError) as exc:
                     yield {"type": "error", "message": f"Critic {batch_index} returned invalid scorecards: {exc}", "phase": "critic", "recoverable": True}
+                yield {"type": "critic_thinking_done", "batch": batch_index}
                 unfinished_critics -= 1
         except asyncio.CancelledError:
             for task in critic_tasks:
@@ -392,12 +411,17 @@ class CouncilWorkflow:
             schema=ArchitectBlueprint,
             model=architect_model,
             reasoning_effort="low",
+            include_reasoning=True,
         ):
+            reasoning = getattr(update, "reasoning", "")
+            if reasoning:
+                yield {"type": "architect_thinking", "chunk": reasoning}
             if update.delta:
                 architect_chunks.append(update.delta)
                 yield {"type": "architect_chunk", "chunk": update.delta}
             if update.usage is not None:
                 architect_usage = update.usage
+        yield {"type": "architect_thinking_done"}
         architect_raw = "".join(architect_chunks)
         architect_duration = time.perf_counter() - started_at
         add_usage(architect_usage)
@@ -430,12 +454,21 @@ class CouncilWorkflow:
         started_at = time.perf_counter()
         final_chunks: list[str] = []
         final_usage: UsageDict = {"prompt": 0, "completion": 0, "total": 0}
-        async for update in client.stream_generate(finalizer_prompt, model=finalizer_model, reasoning_effort="low"):
+        async for update in client.stream_generate(
+            finalizer_prompt,
+            model=finalizer_model,
+            reasoning_effort="low",
+            include_reasoning=True,
+        ):
+            reasoning = getattr(update, "reasoning", "")
+            if reasoning:
+                yield {"type": "finalizer_thinking", "chunk": reasoning}
             if update.delta:
                 final_chunks.append(update.delta)
                 yield {"type": "finalizer_chunk", "chunk": update.delta}
             if update.usage is not None:
                 final_usage = update.usage
+        yield {"type": "finalizer_thinking_done"}
         final_output = "".join(final_chunks)
         final_duration = time.perf_counter() - started_at
         add_usage(final_usage)

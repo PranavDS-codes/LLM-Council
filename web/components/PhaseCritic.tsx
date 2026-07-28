@@ -15,11 +15,14 @@ export function PhaseCritic() {
 
   if (!criticData) {
     if (!currentSession?.criticProgress) return null;
+    const activeThinking = Object.entries(currentSession.criticThinking)
+      .filter(([, content]) => content.trim());
     return (
       <div className="rounded-2xl border border-indigo-500/25 bg-indigo-500/5 p-6">
         <p className="text-xs font-bold uppercase tracking-[0.2em] text-indigo-400">Peer review in progress</p>
         <p className="mt-3 text-sm text-[var(--text-muted)]">The critic is reviewing batch {currentSession.criticProgress.batch} of {currentSession.criticProgress.totalBatches}. Structured findings will appear once validated.</p>
         <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-[var(--border-base)]"><div className="h-full w-2/3 animate-pulse rounded-full bg-indigo-500" /></div>
+        {activeThinking.length > 0 && <div className="mt-5 grid gap-3 md:grid-cols-2">{activeThinking.map(([batch, content]) => <div key={batch} className="rounded-xl border border-indigo-500/20 bg-[var(--bg-panel)]/60 p-4"><p className="text-[10px] font-bold uppercase tracking-[0.16em] text-indigo-300">Thinking: Critic {batch}</p><p className="mt-2 max-h-28 overflow-y-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-[var(--text-muted)]">{content}</p></div>)}</div>}
       </div>
     );
   }

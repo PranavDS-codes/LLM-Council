@@ -31,14 +31,12 @@ export function PhaseFollowUpChat() {
 
   return (
     <section className="mx-auto max-w-[1400px] space-y-6 py-4">
-      <div className="flex items-start gap-3">
-        <div className="flex gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-400"><Brain className="h-5 w-5" /></div>
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-500">Council Follow-Up</p>
-            <h3 className="mt-1 text-xl font-bold text-[var(--text-main)]">Continue from the final consensus</h3>
-            <p className="mt-1 max-w-2xl text-sm text-[var(--text-muted)]">This conversation is grounded only in the final synthesized report and this chat. Council drafts, reviews, and blueprints are not included.</p>
-          </div>
+      <div className="flex flex-col items-center text-center">
+        <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-400"><Brain className="h-5 w-5" /></div>
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-500">Council Follow-Up</p>
+          <h3 className="mt-1 text-xl font-bold text-[var(--text-main)]">Continue from the final consensus</h3>
+          <p className="mt-1 max-w-2xl text-sm text-[var(--text-muted)]">This conversation is grounded only in the final synthesized report and this chat. Council drafts, reviews, and blueprints are not included.</p>
         </div>
       </div>
 

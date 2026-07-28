@@ -64,8 +64,8 @@ export default function AgentsPage() {
           body: JSON.stringify({ model_id: agent.model.trim(), api_key: settings.apiKey || undefined }),
         });
         if (!response.ok) {
-          const body = await response.json();
-          throw new Error(body.detail || `Error ${response.status}`);
+          const body = await response.json().catch(() => null);
+          throw new Error(body?.detail || `Model verification failed with status ${response.status}. Check the Render NVIDIA_API_KEY and API URL.`);
         }
         return [agent.id, { status: 'valid', message: 'Model verified.' }] as const;
       } catch (testError) {

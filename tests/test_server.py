@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
+from openai import OpenAIError
 
 from llm_council import server
 from llm_council.llm_client import StreamUpdate
@@ -28,6 +29,12 @@ class ServerTests(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["valid"])
+
+    def test_check_model_reports_missing_server_credentials_clearly(self):
+        with patch.object(server, "LLMClient", side_effect=OpenAIError("Missing credentials")):
+            response = self.client.post("/api/check-model", json={"model_id": "openai/gpt-oss-20b"})
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("NVIDIA credentials", response.json()["detail"])
 
     def test_check_credentials_maps_unexpected_errors(self):
         with patch.object(

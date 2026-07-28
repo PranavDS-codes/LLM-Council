@@ -128,6 +128,9 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake_client.calls[0][1]["model"], "model/custom")
         self.assertNotIn("max_tokens", fake_client.calls[0][1])
         self.assertEqual(fake_client.calls[0][1]["reasoning_effort"], "low")
+        self.assertEqual(fake_client.calls[1][1]["reasoning_effort"], "low")
+        self.assertEqual(fake_client.calls[2][1]["reasoning_effort"], "low")
+        self.assertEqual(fake_client.calls[3][1]["reasoning_effort"], "low")
         self.assertIn("SCORECARD", fake_client.calls[2][0][0])
         self.assertIn("SCORECARD", fake_client.calls[3][0][0])
 

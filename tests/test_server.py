@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -93,6 +94,23 @@ class ServerTests(unittest.TestCase):
             "model": "nvidia/unsupported",
         })
         self.assertEqual(invalid.status_code, 422)
+
+    def test_summon_stream_sends_keepalives_while_waiting_for_workflow_events(self):
+        async def delayed_events(_request):
+            await asyncio.sleep(0.02)
+            yield {"type": "done", "total_execution_time": 0, "total_tokens": {"prompt": 0, "completion": 0, "total": 0}}
+
+        async def collect() -> list[str]:
+            messages = []
+            request = server.SummonRequest(query="Test", selected_agents=["The Academic"])
+            with patch.object(server.workflow, "stream", side_effect=delayed_events), patch.object(server, "SSE_HEARTBEAT_SECONDS", 0.001):
+                async for message in server.stream_workflow(request):
+                    messages.append(message)
+            return messages
+
+        messages = asyncio.run(collect())
+        self.assertTrue(any(message.startswith(": keepalive") for message in messages))
+        self.assertTrue(any("event: done" in message for message in messages))
 
 
 if __name__ == "__main__":

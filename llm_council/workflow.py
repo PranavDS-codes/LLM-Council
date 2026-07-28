@@ -310,7 +310,12 @@ class CouncilWorkflow:
                 usage: UsageDict = {"prompt": 0, "completion": 0, "total": 0}
                 started = time.perf_counter()
                 try:
-                    async for update in client.stream_generate(critic_prompt, schema=CriticBatchOutput, model=critic_model):
+                    async for update in client.stream_generate(
+                        critic_prompt,
+                        schema=CriticBatchOutput,
+                        model=critic_model,
+                        reasoning_effort="low",
+                    ):
                         if update.delta:
                             chunks.append(update.delta)
                             await critic_queue.put(("chunk", index, update.delta))
@@ -382,7 +387,12 @@ class CouncilWorkflow:
         started_at = time.perf_counter()
         architect_chunks: list[str] = []
         architect_usage: UsageDict = {"prompt": 0, "completion": 0, "total": 0}
-        async for update in client.stream_generate(architect_prompt, schema=ArchitectBlueprint, model=architect_model):
+        async for update in client.stream_generate(
+            architect_prompt,
+            schema=ArchitectBlueprint,
+            model=architect_model,
+            reasoning_effort="low",
+        ):
             if update.delta:
                 architect_chunks.append(update.delta)
                 yield {"type": "architect_chunk", "chunk": update.delta}
@@ -420,7 +430,7 @@ class CouncilWorkflow:
         started_at = time.perf_counter()
         final_chunks: list[str] = []
         final_usage: UsageDict = {"prompt": 0, "completion": 0, "total": 0}
-        async for update in client.stream_generate(finalizer_prompt, model=finalizer_model):
+        async for update in client.stream_generate(finalizer_prompt, model=finalizer_model, reasoning_effort="low"):
             if update.delta:
                 final_chunks.append(update.delta)
                 yield {"type": "finalizer_chunk", "chunk": update.delta}

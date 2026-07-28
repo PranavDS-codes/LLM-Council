@@ -6,7 +6,7 @@ from typing import Any, AsyncIterator, Literal, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from openai import APIStatusError
+from openai import APIStatusError, OpenAIError
 from pydantic import BaseModel, Field, model_validator
 
 from .llm_client import LLMClient
@@ -172,10 +172,15 @@ async def check_model(request: CheckModelRequest) -> dict[str, Any]:
     if not request.model_id:
         raise HTTPException(status_code=400, detail="Model ID is empty")
 
-    client = LLMClient(api_key=request.api_key, settings=settings)
     try:
+        client = LLMClient(api_key=request.api_key, settings=settings)
         await client.check_connection(request.model_id)
         return {"valid": True, "message": "Model verified"}
+    except OpenAIError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="NVIDIA credentials are not configured on the server. Add NVIDIA_API_KEY in Render or provide a custom key in Config.",
+        ) from exc
     except APIStatusError as exc:
         status = exc.status_code or 400
         error_body = exc.body or {}
@@ -190,12 +195,14 @@ async def check_credentials(request: CheckCredentialsRequest) -> dict[str, Any]:
     if not request.api_key:
         raise HTTPException(status_code=400, detail="API Key is empty")
 
-    client = LLMClient(api_key=request.api_key, settings=settings)
     test_model = DEFAULT_MODEL_MAP["generator_1"]
 
     try:
+        client = LLMClient(api_key=request.api_key, settings=settings)
         await client.check_connection(test_model)
         return {"valid": True, "message": "Credentials verified"}
+    except OpenAIError as exc:
+        raise HTTPException(status_code=503, detail="Unable to initialize the NVIDIA client with this API key") from exc
     except APIStatusError as exc:
         status = exc.status_code or 400
         error_body = exc.body or {}

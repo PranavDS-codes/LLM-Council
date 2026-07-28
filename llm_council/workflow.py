@@ -16,8 +16,6 @@ from .tracer import WorkflowTracer
 UsageDict = dict[str, int]
 CouncilEvent = dict[str, Any]
 SCORE_METRICS = ("accuracy", "relevance", "completeness", "clarity", "practical_usefulness")
-COUNCIL_RACE_MODELS = ("openai/gpt-oss-20b", "openai/gpt-oss-120b")
-COUNCIL_RACE_REASONING = {"openai/gpt-oss-20b": "high", "openai/gpt-oss-120b": "low"}
 CONFIGURED_PHASE_TIMEOUT_SECONDS = 30.0
 
 
@@ -138,15 +136,19 @@ class CouncilWorkflow:
 
     @staticmethod
     def _configured_phase_model(role: str, overrides: Optional[dict[str, str]]) -> str | None:
-        """Return an explicit Config override; untouched defaults use the OSS race."""
+        """Return an explicit model selection saved from Config."""
         if not overrides:
             return None
         value = overrides.get(role, "").strip()
         return value or None
 
     @staticmethod
-    def _reasoning_effort_for(model: str) -> str:
-        return "high" if model == "openai/gpt-oss-20b" else "low"
+    def _reasoning_effort_for(role: str) -> str:
+        return {
+            "critic": "high",
+            "architect": "medium",
+            "finalizer": "low",
+        }.get(role, "low")
 
     def _phase_stream(
         self,
@@ -156,24 +158,16 @@ class CouncilWorkflow:
         role: str,
         overrides: Optional[dict[str, str]],
     ) -> tuple[str, AsyncIterator[Any]]:
-        """Run configured phase models directly; race only untouched default phases."""
+        """Use one configured or default model; council phases never run a model race."""
         configured_model = self._configured_phase_model(role, overrides)
-        if configured_model:
-            return configured_model, client.stream_generate(
-                prompt,
-                schema=schema,
-                model=configured_model,
-                reasoning_effort=self._reasoning_effort_for(configured_model),
-                include_reasoning=True,
-                first_response_timeout_seconds=CONFIGURED_PHASE_TIMEOUT_SECONDS,
-            )
-        return "NIM race: GPT-OSS-20B vs GPT-OSS-120B", client.stream_generate_race(
+        model = configured_model or DEFAULT_MODEL_MAP[role]
+        return model, client.stream_generate(
             prompt,
             schema=schema,
-            reasoning_effort="low",
+            model=model,
+            reasoning_effort=self._reasoning_effort_for(role),
             include_reasoning=True,
-            models=COUNCIL_RACE_MODELS,
-            reasoning_efforts=COUNCIL_RACE_REASONING,
+            first_response_timeout_seconds=CONFIGURED_PHASE_TIMEOUT_SECONDS if configured_model else None,
         )
 
     def _new_tracer(self) -> WorkflowTracer:
@@ -344,7 +338,7 @@ class CouncilWorkflow:
             }
             return
 
-        critic_model = self._configured_phase_model("critic", request.custom_model_map) or "NIM race: GPT-OSS-20B vs GPT-OSS-120B"
+        critic_model = self._configured_phase_model("critic", request.custom_model_map) or DEFAULT_MODEL_MAP["critic"]
         critic_batches = balanced_critic_batches(responses)
         critic_queue: asyncio.Queue[tuple[str, int, Any]] = asyncio.Queue()
         critic_tasks: list[asyncio.Task[None]] = []
@@ -433,7 +427,7 @@ class CouncilWorkflow:
             critic_data["reasoning"] = "No critic batch produced valid scorecards; finalists use generator order as a safe fallback."
             yield {"type": "error", "message": "No valid critic scorecards were available; using the first drafts as finalists.", "phase": "critic", "recoverable": True}
         critic_data["time_taken"] = critic_time
-        critic_data["model"] = critic_models_used[0] if len(set(critic_models_used)) == 1 else "Mixed NIM race winners"
+        critic_data["model"] = critic_models_used[0] if critic_models_used else critic_model
         critic_data["usage"] = critic_usage
         yield {"type": "critic_result", **critic_data}
         yield {"type": "critic_done"}

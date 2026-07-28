@@ -30,11 +30,6 @@ class FakeClient:
         yield type("Update", (), {"delta": content[midpoint:], "usage": None})()
         yield type("Update", (), {"delta": "", "usage": usage})()
 
-    async def stream_generate_race(self, prompt, *args, models, **kwargs):
-        async for update in self.stream_generate(prompt, *args, model=models[0], **kwargs):
-            yield update
-
-
 class WorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def test_select_active_agents_filters_invalid_personas(self):
         self.assertEqual(
@@ -132,8 +127,8 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake_client.calls[0][1]["model"], "model/custom")
         self.assertNotIn("max_tokens", fake_client.calls[0][1])
         self.assertEqual(fake_client.calls[0][1]["reasoning_effort"], "low")
-        self.assertEqual(fake_client.calls[1][1]["reasoning_effort"], "low")
-        self.assertEqual(fake_client.calls[2][1]["reasoning_effort"], "low")
+        self.assertEqual(fake_client.calls[1][1]["reasoning_effort"], "high")
+        self.assertEqual(fake_client.calls[2][1]["reasoning_effort"], "medium")
         self.assertEqual(fake_client.calls[3][1]["reasoning_effort"], "low")
         self.assertIn("SCORECARD", fake_client.calls[2][0][0])
         self.assertIn("SCORECARD", fake_client.calls[3][0][0])
@@ -143,16 +138,10 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             def __init__(self, responses):
                 super().__init__(responses)
                 self.calls = []
-                self.race_calls = 0
 
             async def stream_generate(self, *args, **kwargs):
                 self.calls.append((args, kwargs))
                 async for update in super().stream_generate(*args, **kwargs):
-                    yield update
-
-            async def stream_generate_race(self, *args, **kwargs):
-                self.race_calls += 1
-                async for update in super().stream_generate_race(*args, **kwargs):
                     yield update
 
         client = RecordingClient([
@@ -172,7 +161,6 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             query="Test", selected_agents=["The Academic"], custom_model_map=overrides,
         ))]
 
-        self.assertEqual(client.race_calls, 0)
         phase_calls = client.calls[1:]
         self.assertEqual([call[1]["model"] for call in phase_calls], list(overrides.values()))
         self.assertTrue(all(call[1]["first_response_timeout_seconds"] == 30 for call in phase_calls))

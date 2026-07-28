@@ -303,7 +303,7 @@ export default function ConfigPage() {
               <div>
                 <h2 className="mb-2 text-xl font-semibold">Council Phase Models</h2>
                 <p className="text-sm text-[var(--text-muted)]">
-                  Assign models to the critic, blueprint architect, and final synthesis. Saved overrides run directly with a 30-second first-response timeout; blank fields use the default OSS model race. Generator models are managed in Agents.
+                  Assign models to the critic, blueprint architect, and final synthesis. Defaults use GPT-OSS-20B; saved overrides run directly with a 30-second first-response timeout. Generator models are managed in Agents.
                 </p>
               </div>
             </div>

@@ -60,9 +60,9 @@ DEFAULT_MODEL_MAP: Final[dict[str, str]] = {
     "generator_3": "openai/gpt-oss-20b",
     "generator_4": "openai/gpt-oss-20b",
     "generator_5": "openai/gpt-oss-20b",
-    "critic": "openai/gpt-oss-120b",
-    "architect": "openai/gpt-oss-120b",
-    "finalizer": "openai/gpt-oss-120b",
+    "critic": "openai/gpt-oss-20b",
+    "architect": "openai/gpt-oss-20b",
+    "finalizer": "openai/gpt-oss-20b",
 }
 
 

@@ -16,6 +16,9 @@ from .tracer import WorkflowTracer
 UsageDict = dict[str, int]
 CouncilEvent = dict[str, Any]
 SCORE_METRICS = ("accuracy", "relevance", "completeness", "clarity", "practical_usefulness")
+COUNCIL_RACE_MODELS = ("openai/gpt-oss-20b", "openai/gpt-oss-120b")
+COUNCIL_RACE_REASONING = {"openai/gpt-oss-20b": "high", "openai/gpt-oss-120b": "low"}
+CONFIGURED_PHASE_TIMEOUT_SECONDS = 30.0
 
 
 @dataclass(frozen=True)
@@ -132,6 +135,46 @@ class CouncilWorkflow:
         if overrides and role in overrides and overrides[role]:
             return overrides[role]
         return DEFAULT_MODEL_MAP.get(role, fallback)
+
+    @staticmethod
+    def _configured_phase_model(role: str, overrides: Optional[dict[str, str]]) -> str | None:
+        """Return an explicit Config override; untouched defaults use the OSS race."""
+        if not overrides:
+            return None
+        value = overrides.get(role, "").strip()
+        return value or None
+
+    @staticmethod
+    def _reasoning_effort_for(model: str) -> str:
+        return "high" if model == "openai/gpt-oss-20b" else "low"
+
+    def _phase_stream(
+        self,
+        client: LLMClient,
+        prompt: str,
+        schema: Any,
+        role: str,
+        overrides: Optional[dict[str, str]],
+    ) -> tuple[str, AsyncIterator[Any]]:
+        """Run configured phase models directly; race only untouched default phases."""
+        configured_model = self._configured_phase_model(role, overrides)
+        if configured_model:
+            return configured_model, client.stream_generate(
+                prompt,
+                schema=schema,
+                model=configured_model,
+                reasoning_effort=self._reasoning_effort_for(configured_model),
+                include_reasoning=True,
+                first_response_timeout_seconds=CONFIGURED_PHASE_TIMEOUT_SECONDS,
+            )
+        return "NIM race: GPT-OSS-20B vs GPT-OSS-120B", client.stream_generate_race(
+            prompt,
+            schema=schema,
+            reasoning_effort="low",
+            include_reasoning=True,
+            models=COUNCIL_RACE_MODELS,
+            reasoning_efforts=COUNCIL_RACE_REASONING,
+        )
 
     def _new_tracer(self) -> WorkflowTracer:
         return self.tracer_factory(
@@ -301,7 +344,7 @@ class CouncilWorkflow:
             }
             return
 
-        critic_model = self._model_for("critic", DEFAULT_MODEL_MAP["critic"], request.custom_model_map)
+        critic_model = self._configured_phase_model("critic", request.custom_model_map) or "NIM race: GPT-OSS-20B vs GPT-OSS-120B"
         critic_batches = balanced_critic_batches(responses)
         critic_queue: asyncio.Queue[tuple[str, int, Any]] = asyncio.Queue()
         critic_tasks: list[asyncio.Task[None]] = []
@@ -319,14 +362,14 @@ class CouncilWorkflow:
                 chunks: list[str] = []
                 usage: UsageDict = {"prompt": 0, "completion": 0, "total": 0}
                 started = time.perf_counter()
+                model_used = critic_model
                 try:
-                    async for update in client.stream_generate(
-                        critic_prompt,
-                        schema=CriticBatchOutput,
-                        model=critic_model,
-                        reasoning_effort="low",
-                        include_reasoning=True,
-                    ):
+                    _model_label, stream = self._phase_stream(
+                        client, critic_prompt, CriticBatchOutput, "critic", request.custom_model_map,
+                    )
+                    async for update in stream:
+                        if getattr(update, "model", None):
+                            model_used = update.model
                         reasoning = getattr(update, "reasoning", "")
                         if reasoning:
                             await critic_queue.put(("thinking", index, reasoning))
@@ -335,7 +378,7 @@ class CouncilWorkflow:
                             await critic_queue.put(("chunk", index, update.delta))
                         if update.usage is not None:
                             usage = update.usage
-                    await critic_queue.put(("done", index, (critic_batch, critic_prompt, "".join(chunks), usage, started)))
+                    await critic_queue.put(("done", index, (critic_batch, critic_prompt, "".join(chunks), usage, started, model_used)))
                 except Exception as exc:  # pragma: no cover - defensive async boundary
                     await critic_queue.put(("error", index, exc))
 
@@ -344,6 +387,7 @@ class CouncilWorkflow:
         collected_reviews: dict[str, dict[str, Any]] = {}
         critic_usage: UsageDict = {"prompt": 0, "completion": 0, "total": 0}
         critic_time = 0.0
+        critic_models_used: list[str] = []
         unfinished_critics = len(critic_tasks)
         try:
             while unfinished_critics:
@@ -360,9 +404,10 @@ class CouncilWorkflow:
                     unfinished_critics -= 1
                     continue
 
-                batch, prompt, critic_json, usage, started = payload
+                batch, prompt, critic_json, usage, started, model_used = payload
                 duration = time.perf_counter() - started
                 critic_time += duration
+                critic_models_used.append(model_used)
                 add_usage(usage)
                 for key in critic_usage:
                     critic_usage[key] += usage.get(key, 0)
@@ -388,7 +433,7 @@ class CouncilWorkflow:
             critic_data["reasoning"] = "No critic batch produced valid scorecards; finalists use generator order as a safe fallback."
             yield {"type": "error", "message": "No valid critic scorecards were available; using the first drafts as finalists.", "phase": "critic", "recoverable": True}
         critic_data["time_taken"] = critic_time
-        critic_data["model"] = critic_model
+        critic_data["model"] = critic_models_used[0] if len(set(critic_models_used)) == 1 else "Mixed NIM race winners"
         critic_data["usage"] = critic_usage
         yield {"type": "critic_result", **critic_data}
         yield {"type": "critic_done"}
@@ -401,18 +446,17 @@ class CouncilWorkflow:
             finalist_responses=finalist_context,
             critiques=json.dumps(critic_data),
         )
-        architect_model = self._model_for("architect", DEFAULT_MODEL_MAP["architect"], request.custom_model_map)
+        architect_model, architect_stream = self._phase_stream(
+            client, architect_prompt, ArchitectBlueprint, "architect", request.custom_model_map,
+        )
         yield {"type": "architect_start", "model": architect_model}
         started_at = time.perf_counter()
         architect_chunks: list[str] = []
         architect_usage: UsageDict = {"prompt": 0, "completion": 0, "total": 0}
-        async for update in client.stream_generate(
-            architect_prompt,
-            schema=ArchitectBlueprint,
-            model=architect_model,
-            reasoning_effort="low",
-            include_reasoning=True,
-        ):
+        architect_model_used = architect_model
+        async for update in architect_stream:
+            if getattr(update, "model", None):
+                architect_model_used = update.model
             reasoning = getattr(update, "reasoning", "")
             if reasoning:
                 yield {"type": "architect_thinking", "chunk": reasoning}
@@ -440,7 +484,7 @@ class CouncilWorkflow:
             architect_raw = json.dumps(architect_data)
 
         architect_data["time_taken"] = architect_duration
-        architect_data["model"] = architect_model
+        architect_data["model"] = architect_model_used
         architect_data["usage"] = architect_usage
         yield {"type": "architect_result", **architect_data}
 
@@ -449,17 +493,17 @@ class CouncilWorkflow:
             blueprint=architect_raw,
             context=finalist_context,
         )
-        finalizer_model = self._model_for("finalizer", DEFAULT_MODEL_MAP["finalizer"], request.custom_model_map)
+        finalizer_model, finalizer_stream = self._phase_stream(
+            client, finalizer_prompt, None, "finalizer", request.custom_model_map,
+        )
         yield {"type": "finalizer_start", "model": finalizer_model}
         started_at = time.perf_counter()
         final_chunks: list[str] = []
         final_usage: UsageDict = {"prompt": 0, "completion": 0, "total": 0}
-        async for update in client.stream_generate(
-            finalizer_prompt,
-            model=finalizer_model,
-            reasoning_effort="low",
-            include_reasoning=True,
-        ):
+        finalizer_model_used = finalizer_model
+        async for update in finalizer_stream:
+            if getattr(update, "model", None):
+                finalizer_model_used = update.model
             reasoning = getattr(update, "reasoning", "")
             if reasoning:
                 yield {"type": "finalizer_thinking", "chunk": reasoning}
@@ -477,7 +521,7 @@ class CouncilWorkflow:
         yield {
             "type": "finalizer_done",
             "time_taken": final_duration,
-            "model": finalizer_model,
+            "model": finalizer_model_used,
             "usage": final_usage,
         }
 

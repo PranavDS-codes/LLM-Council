@@ -19,6 +19,7 @@ class StreamUpdate:
     delta: str = ""
     reasoning: str = ""
     usage: UsageDict | None = None
+    model: str | None = None
 
 class LLMClient:
     def __init__(self, api_key: Optional[str] = None, settings: Optional[Settings] = None):
@@ -50,6 +51,8 @@ class LLMClient:
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
         include_reasoning: bool = False,
+        fallback_model: Optional[str] = None,
+        first_response_timeout_seconds: float | None = None,
     ) -> AsyncIterator[StreamUpdate]:
         """Yield true NVIDIA NIM deltas followed by terminal token usage."""
         if self.mock_mode:
@@ -60,14 +63,31 @@ class LLMClient:
             yield StreamUpdate(usage=usage)
             return
 
-        async for update in self._stream_messages(
-            [{"role": "user", "content": prompt}],
-            schema=schema,
-            model=model,
-            reasoning_effort=reasoning_effort,
-            include_reasoning=include_reasoning,
-        ):
-            yield update
+        emitted_content = False
+        try:
+            async for update in self._stream_messages(
+                [{"role": "user", "content": prompt}],
+                schema=schema,
+                model=model,
+                reasoning_effort=reasoning_effort,
+                include_reasoning=include_reasoning,
+                first_response_timeout_seconds=first_response_timeout_seconds,
+            ):
+                emitted_content = emitted_content or bool(update.delta)
+                yield update
+        except RuntimeError:
+            if not fallback_model or emitted_content or fallback_model == model:
+                raise
+            print(f"[WARNING] Falling back from {model} to {fallback_model} after no visible response.")
+            async for update in self._stream_messages(
+                [{"role": "user", "content": prompt}],
+                schema=schema,
+                model=fallback_model,
+                reasoning_effort=reasoning_effort,
+                include_reasoning=include_reasoning,
+                first_response_timeout_seconds=first_response_timeout_seconds,
+            ):
+                yield update
 
     async def stream_chat(
         self,
@@ -93,6 +113,71 @@ class LLMClient:
         ):
             yield update
 
+    async def stream_generate_race(
+        self,
+        prompt: str,
+        schema: Optional[Any] = None,
+        reasoning_effort: Optional[str] = None,
+        models: tuple[str, str] = ("openai/gpt-oss-20b", "openai/gpt-oss-120b"),
+        reasoning_efforts: dict[str, str] | None = None,
+        include_reasoning: bool = False,
+    ) -> AsyncIterator[StreamUpdate]:
+        """Race two NIM models and keep the first one to emit answer content."""
+        queue: asyncio.Queue[tuple[str, str, StreamUpdate | Exception | None]] = asyncio.Queue()
+
+        async def pump(model: str) -> None:
+            try:
+                async for update in self.stream_generate(
+                    prompt,
+                    schema=schema,
+                    model=model,
+                    reasoning_effort=(reasoning_efforts or {}).get(model, reasoning_effort),
+                    include_reasoning=include_reasoning,
+                ):
+                    await queue.put(("update", model, update))
+            except Exception as exc:  # pragma: no cover - defensive async boundary
+                await queue.put(("error", model, exc))
+            finally:
+                await queue.put(("done", model, None))
+
+        tasks = {model: asyncio.create_task(pump(model)) for model in models}
+        winner: str | None = None
+        errors: list[Exception] = []
+        remaining = len(tasks)
+        try:
+            while remaining:
+                event_type, model, payload = await queue.get()
+                if event_type == "done":
+                    remaining -= 1
+                    continue
+                if event_type == "error":
+                    errors.append(payload if isinstance(payload, Exception) else RuntimeError("Unknown NIM race failure"))
+                    continue
+                update = payload
+                if not isinstance(update, StreamUpdate):
+                    continue
+                if winner is None:
+                    # Reasoning alone is not enough to win: select the first usable answer stream.
+                    if not update.delta:
+                        if update.reasoning:
+                            yield update
+                        continue
+                    winner = model
+                    for candidate, task in tasks.items():
+                        if candidate != winner:
+                            task.cancel()
+                if model == winner:
+                    yield update
+
+            if winner is None:
+                details = "; ".join(str(error) for error in errors) or "both models completed without answer content"
+                raise RuntimeError(f"NVIDIA NIM model race failed: {details}")
+        finally:
+            for task in tasks.values():
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks.values(), return_exceptions=True)
+
     async def _stream_messages(
         self,
         messages: list[dict[str, str]],
@@ -100,6 +185,7 @@ class LLMClient:
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
         include_reasoning: bool = False,
+        first_response_timeout_seconds: float | None = None,
     ) -> AsyncIterator[StreamUpdate]:
         """Shared NVIDIA stream implementation for council work and follow-up chat."""
 
@@ -114,15 +200,27 @@ class LLMClient:
             kwargs["reasoning_effort"] = reasoning_effort
         if schema:
             kwargs["response_format"] = {"type": "json_object"}
+        timeout_seconds = first_response_timeout_seconds or self.settings.nvidia_first_response_timeout_seconds
 
         for attempt in range(4):
             emitted_content = False
             try:
                 print("\n[DEBUG] Starting NVIDIA NIM stream:")
                 print(f"Model: {target_model}")
-                stream = await self.openai_client.chat.completions.create(**kwargs)
+                stream = await asyncio.wait_for(
+                    self.openai_client.chat.completions.create(**kwargs),
+                    timeout=timeout_seconds,
+                )
                 terminal_usage: UsageDict | None = None
-                async for chunk in stream:
+                stream_iterator = stream.__aiter__()
+                while True:
+                    try:
+                        chunk = await asyncio.wait_for(
+                            anext(stream_iterator),
+                            timeout=timeout_seconds,
+                        ) if not emitted_content else await anext(stream_iterator)
+                    except StopAsyncIteration:
+                        break
                     if chunk.usage:
                         terminal_usage = {
                             "prompt": chunk.usage.prompt_tokens or 0,
@@ -141,8 +239,13 @@ class LLMClient:
                     if delta:
                         emitted_content = True
                         yield StreamUpdate(delta=delta)
-                yield StreamUpdate(usage=terminal_usage or {"prompt": 0, "completion": 0, "total": 0})
+                yield StreamUpdate(usage=terminal_usage or {"prompt": 0, "completion": 0, "total": 0}, model=target_model)
                 return
+            except TimeoutError as exc:
+                raise RuntimeError(
+                    f"NVIDIA NIM did not produce a response from {target_model} within "
+                    f"{timeout_seconds:.0f}s"
+                ) from exc
             except APIStatusError as exc:
                 print(f"[ERROR] NVIDIA NIM stream status error: {exc.status_code} - {exc}")
                 if exc.status_code in [400, 422] and not emitted_content:

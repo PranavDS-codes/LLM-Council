@@ -71,6 +71,7 @@ class Settings:
     use_mock_mode: bool
     nvidia_api_key: str | None
     nvidia_api_base_url: str
+    nvidia_first_response_timeout_seconds: float
     cors_allow_origins: tuple[str, ...]
     cors_allow_origin_regex: str | None
     enable_trace_logs: bool
@@ -84,6 +85,7 @@ def get_settings() -> Settings:
         use_mock_mode=_env_flag("USE_MOCK_MODE", False),
         nvidia_api_key=_env_optional("NVIDIA_API_KEY"),
         nvidia_api_base_url=os.getenv("NVIDIA_API_BASE_URL", "https://integrate.api.nvidia.com/v1"),
+        nvidia_first_response_timeout_seconds=float(os.getenv("NVIDIA_FIRST_RESPONSE_TIMEOUT_SECONDS", "20")),
         cors_allow_origins=_env_csv(
             "CORS_ALLOW_ORIGINS",
             ("http://localhost:3000", "http://127.0.0.1:3000"),
